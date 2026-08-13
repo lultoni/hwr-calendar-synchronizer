@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from hwr_sync.config import CONFIG_DIR
+
 STATE_PATH = CONFIG_DIR / "state.json"
 
 
@@ -32,29 +32,21 @@ def load_state(path: Path = STATE_PATH) -> dict[str, ManagedEvent]:
     if not path.exists():
         return {}
     raw: dict[str, Any] = json.loads(path.read_text())
+    # Support both old flat format and new {events: ...} format
+    events_raw = raw.get("events", raw) if isinstance(raw, dict) else raw
     result = {}
-    for uid, data in raw.get("events", raw).items():
+    for uid, data in events_raw.items():
+        if not isinstance(data, dict):
+            continue
         data.setdefault("cal_id", "")
         result[uid] = ManagedEvent(**data)
     return result
 
 
-def load_user_deleted(path: Path = STATE_PATH) -> set[str]:
-    if not path.exists():
-        return set()
-    raw: dict[str, Any] = json.loads(path.read_text())
-    return set(raw.get("user_deleted", []))
-
-
-def save_state(events, cal_ids: dict[str, str] | None = None,
-               user_deleted: set[str] | None = None, path: Path = STATE_PATH) -> None:
-    # Preserve existing user_deleted unless explicitly overridden
-    existing_deleted = load_user_deleted(path)
-    merged_deleted = (existing_deleted | (user_deleted or set()))
-
-    events_dict: dict[str, Any] = {}
+def save_state(events, cal_ids: dict[str, str] | None = None, path: Path = STATE_PATH) -> None:
+    state: dict[str, Any] = {}
     for e in events:
-        events_dict[e.uid] = asdict(ManagedEvent(
+        state[e.uid] = asdict(ManagedEvent(
             uid=e.uid,
             title=e.title,
             start=e.start.isoformat(),
@@ -64,11 +56,7 @@ def save_state(events, cal_ids: dict[str, str] | None = None,
             event_hash=_event_hash(e),
             cal_id=(cal_ids or {}).get(e.uid, ""),
         ))
-
-    path.write_text(json.dumps(
-        {"events": events_dict, "user_deleted": sorted(merged_deleted)},
-        indent=2, ensure_ascii=False,
-    ))
+    path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def make_hash(event) -> str:

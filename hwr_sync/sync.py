@@ -5,19 +5,18 @@ from datetime import datetime, timezone
 
 from hwr_sync.backends import get_backend
 from hwr_sync.config import build_ics_url, get_current_semester, load_config, load_overrides
+from hwr_sync.conflicts import Conflict, add_conflicts
 from hwr_sync.diff import compute_diff
 from hwr_sync.fetcher import fetch_ics
 from hwr_sync.filter import apply_filters, filter_past
 from hwr_sync.notify import notify
-from hwr_sync.state import load_state, load_user_deleted, save_state
+from hwr_sync.state import load_state, save_state
 
 logger = logging.getLogger("hwr_sync")
 
 
 def sync() -> bool:
-    """
-    Single sync pass. Returns True if sync ran, False if study period is over.
-    """
+    """Single sync pass. Returns True if sync ran, False if study period is over."""
     config = load_config()
     now = datetime.now(tz=timezone.utc)
 
@@ -28,80 +27,111 @@ def sync() -> bool:
 
     logger.info("Syncing semester %d (%s) ...", semester.number, semester.course)
 
-    # 1. Fetch + filter ICS
+    # 1. Fetch + filter ICS (= what HWR currently says)
     url = build_ics_url(config.faculty, semester.number, semester.course)
     all_events = fetch_ics(url)
     events = filter_past(all_events, now)
     active_filters = semester.filters if semester.filters is not None else config.filters
     events = apply_filters(events, active_filters)
 
-    # 2. Load state, overrides, and previously user-deleted UIDs
+    # 2. Load state (= what HWR said last sync) and overrides
     state = load_state()
-    overrides = load_overrides()
-    user_deleted_uids = load_user_deleted()
-
-    # Skip events the user explicitly deleted (until HWR removes them from ICS too)
-    events = [e for e in events if e.uid not in user_deleted_uids]
 
     # 3. Read current calendar state for all managed UIDs
     backend = get_backend(config)
     calendar = backend.read_managed(set(state.keys()))
 
-    # 4. Compute diff (ICS vs state vs calendar)
-    diff = compute_diff(
-        incoming=events,
-        known=state,
-        calendar=calendar,
-        overrides=overrides,
-    )
+    # 4. Diff: ICS vs state vs calendar
+    diff = compute_diff(incoming=events, known=state, calendar=calendar)
 
-    # 5. Apply changes
+    # 5. Apply clean changes
     new_cal_ids = backend.insert(diff.new)
     backend.update(diff.updated)
     backend.delete(diff.deleted)
 
-    # 6. Build cal_ids map: existing from state + newly inserted
+    # 6. Collect cal_ids for state (existing + newly inserted)
     cal_ids = {uid: m.cal_id for uid, m in state.items()}
     cal_ids.update(new_cal_ids)
 
-    # 6. Handle user changes — accept them, update state accordingly
-    if diff.user_deleted:
-        uids = {m.uid for m in diff.user_deleted}
-        logger.info("Accepted %d deletion(s) you made in the calendar.", len(uids))
+    # 7. Save state = ICS stand (all incoming events we manage)
+    #    User-deleted and user-modified stay in state at ICS-level
+    #    so next sync can detect if HWR changes them
+    save_state(events, cal_ids=cal_ids)
 
-    if diff.user_modified:
-        logger.info("Accepted %d modification(s) you made in the calendar.", len(diff.user_modified))
+    # 8. Record divergences as conflicts for user to resolve
+    new_conflicts: list[Conflict] = []
 
-    # 7. Conflicts
-    if diff.conflicts:
-        _handle_conflicts(diff.conflicts)
+    for ics_event, managed in diff.user_deleted:
+        new_conflicts.append(Conflict(
+            uid=ics_event.uid,
+            kind="user_deleted",
+            title=ics_event.title,
+            ics_title=ics_event.title,
+            ics_start=ics_event.start.isoformat(),
+            ics_end=ics_event.end.isoformat(),
+            ics_location=ics_event.location,
+            cal_title="",
+            cal_start="",
+            cal_end="",
+            cal_location="",
+            cal_id=managed.cal_id,
+        ))
 
-    # 8. Save new state — include newly user-deleted UIDs persistently
-    new_user_deleted = {m.uid for m in diff.user_deleted}
-    user_modified_uids = {m.uid for m, _ in diff.user_modified}
-    final_events = [e for e in events if e.uid not in new_user_deleted]
-    user_modified_map = {m.uid: cal_e for m, cal_e in diff.user_modified}
-    final_events = [user_modified_map.get(e.uid, e) for e in final_events]
+    for ics_event, managed, cal_event in diff.user_modified:
+        new_conflicts.append(Conflict(
+            uid=ics_event.uid,
+            kind="user_modified",
+            title=ics_event.title,
+            ics_title=ics_event.title,
+            ics_start=ics_event.start.isoformat(),
+            ics_end=ics_event.end.isoformat(),
+            ics_location=ics_event.location,
+            cal_title=cal_event.title,
+            cal_start=cal_event.start.isoformat(),
+            cal_end=cal_event.end.isoformat(),
+            cal_location=cal_event.location,
+            cal_id=managed.cal_id,
+        ))
 
-    save_state(final_events, cal_ids=cal_ids, user_deleted=new_user_deleted)
+    for ics_event, managed, cal_event in diff.both_changed:
+        new_conflicts.append(Conflict(
+            uid=ics_event.uid,
+            kind="both_changed",
+            title=ics_event.title,
+            ics_title=ics_event.title,
+            ics_start=ics_event.start.isoformat(),
+            ics_end=ics_event.end.isoformat(),
+            ics_location=ics_event.location,
+            cal_title=cal_event.title,
+            cal_start=cal_event.start.isoformat(),
+            cal_end=cal_event.end.isoformat(),
+            cal_location=cal_event.location,
+            cal_id=managed.cal_id,
+        ))
+
+    for ics_event, managed in diff.hwr_changed_user_deleted:
+        new_conflicts.append(Conflict(
+            uid=ics_event.uid,
+            kind="hwr_changed_user_deleted",
+            title=ics_event.title,
+            ics_title=ics_event.title,
+            ics_start=ics_event.start.isoformat(),
+            ics_end=ics_event.end.isoformat(),
+            ics_location=ics_event.location,
+            cal_title="",
+            cal_start="",
+            cal_end="",
+            cal_location="",
+            cal_id=managed.cal_id,
+        ))
+
+    if new_conflicts:
+        add_conflicts(new_conflicts)
+        logger.warning("%d new conflict(s) — run `hwr-sync conflicts` to review.", len(new_conflicts))
+        notify(
+            "HWR Sync: Conflicts",
+            f"{len(new_conflicts)} conflict(s) found — run `hwr-sync conflicts` to review.",
+        )
 
     logger.info("Sync complete: %s", diff.summary())
     return True
-
-
-def _handle_conflicts(conflicts) -> None:
-    lines = []
-    for incoming, managed, cal_event in conflicts:
-        if incoming is None:
-            lines.append(f"  • '{managed.title}' removed from HWR timetable")
-        elif cal_event is None:
-            lines.append(f"  • '{managed.title}' changed in HWR timetable but you deleted it")
-        else:
-            lines.append(f"  • '{managed.title}' changed in both HWR timetable and your calendar")
-
-    msg = "\n".join(lines)
-    logger.warning("Conflicts (calendar not changed — review manually):\n%s", msg)
-    notify(
-        "HWR Sync: Conflicts",
-        f"{len(conflicts)} event(s) changed in both HWR and your calendar. Check the log.",
-    )

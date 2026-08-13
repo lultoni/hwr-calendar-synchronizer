@@ -11,6 +11,7 @@ from pathlib import Path
 import click
 
 from hwr_sync import scheduler
+from hwr_sync.conflicts import Conflict, load_conflicts, remove_conflict, clear_conflicts
 from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, OVERRIDES_PATH, load_config
 from hwr_sync.state import load_state
 from hwr_sync.sync import sync
@@ -96,8 +97,165 @@ def status():
             click.echo(f"Last sync:      {last.strip()}")
 
 
-@main.command()
-def settings():
+@main.command("conflicts")
+def conflicts_cmd():
+    """Review and resolve calendar conflicts interactively."""
+    conflicts = load_conflicts()
+    if not conflicts:
+        click.echo("No conflicts. Everything is in sync.")
+        return
+
+    click.echo(f"\n{len(conflicts)} conflict(s) to review.\n")
+    click.echo("Options per item:  [k] keep yours  [r] restore from HWR  [s] skip (decide later)\n")
+
+    backend = None  # lazy init
+
+    resolved = []
+    skipped = []
+
+    for i, c in enumerate(conflicts):
+        click.echo(f"─── {i+1}/{len(conflicts)} ───────────────────────────────")
+        _print_conflict(c)
+
+        options = _conflict_options(c)
+        choice = None
+        while choice not in options:
+            choice = click.prompt(
+                "Choice",
+                default="s",
+                show_choices=True,
+                type=click.Choice(list(options.keys()) + ["s"]),
+            )
+
+        if choice == "s":
+            skipped.append(c)
+            click.echo("Skipped — will show again next time.\n")
+            continue
+
+        # Execute chosen action
+        if backend is None:
+            from hwr_sync.backends import get_backend
+            backend = get_backend(load_config())
+
+        _execute_resolution(c, choice, backend)
+        resolved.append(c.uid)
+        click.echo()
+
+        # After new items, offer to skip the rest
+        if i < len(conflicts) - 1 and skipped == [] and resolved:
+            if click.confirm(f"  {len(conflicts) - i - 1} item(s) left — skip the rest for now?", default=False):
+                skipped.extend(conflicts[i+1:])
+                break
+
+    # Persist: remove resolved, keep skipped
+    for uid in resolved:
+        remove_conflict(uid)
+
+    click.echo(f"\nDone. {len(resolved)} resolved, {len(skipped)} left open.")
+
+
+def _print_conflict(c: Conflict) -> None:
+    KIND_LABELS = {
+        "user_deleted":            "You deleted this — HWR still has it",
+        "user_modified":           "You modified this — HWR hasn't changed it",
+        "both_changed":            "Both you and HWR changed this",
+        "hwr_changed_user_deleted": "You deleted this AND HWR changed it",
+    }
+    click.echo(f"  Event:  {c.title}")
+    click.echo(f"  Status: {KIND_LABELS.get(c.kind, c.kind)}")
+    click.echo()
+
+    if c.ics_title:
+        click.echo(f"  HWR version:")
+        click.echo(f"    Title:    {c.ics_title}")
+        click.echo(f"    Start:    {c.ics_start}")
+        click.echo(f"    End:      {c.ics_end}")
+        if c.ics_location:
+            click.echo(f"    Location: {c.ics_location}")
+
+    if c.cal_title:
+        click.echo(f"  Your version:")
+        click.echo(f"    Title:    {c.cal_title}")
+        click.echo(f"    Start:    {c.cal_start}")
+        click.echo(f"    End:      {c.cal_end}")
+        if c.cal_location:
+            click.echo(f"    Location: {c.cal_location}")
+    click.echo()
+
+
+def _conflict_options(c: Conflict) -> dict[str, str]:
+    if c.kind == "user_deleted":
+        return {"k": "keep deleted", "r": "restore from HWR"}
+    if c.kind == "user_modified":
+        return {"k": "keep your version", "r": "restore HWR version"}
+    if c.kind == "both_changed":
+        return {"k": "keep your version", "r": "use HWR version"}
+    if c.kind == "hwr_changed_user_deleted":
+        return {"k": "keep deleted", "r": "restore HWR's new version"}
+    return {"k": "keep", "r": "restore"}
+
+
+def _execute_resolution(c: Conflict, choice: str, backend) -> None:
+    from hwr_sync.fetcher import CalEvent
+    from hwr_sync.state import load_state, save_state
+    from datetime import datetime, timezone
+
+    if choice == "k":
+        # Keep user's version — update state hash to match current calendar
+        # so next sync doesn't flag it again
+        state = load_state()
+        if c.uid in state:
+            managed = state[c.uid]
+            if c.cal_title:
+                # User modified: store calendar version as new ICS baseline
+                from hwr_sync.state import ManagedEvent, make_hash
+                cal_event = CalEvent(
+                    uid=c.uid,
+                    title=c.cal_title,
+                    start=datetime.fromisoformat(c.cal_start),
+                    end=datetime.fromisoformat(c.cal_end),
+                    location=c.cal_location,
+                    description="",
+                )
+                managed.event_hash = make_hash(cal_event)
+            else:
+                # User deleted: remove from state entirely
+                del state[c.uid]
+            _save_state_dict(state)
+        click.echo("Kept your version.")
+
+    elif choice == "r":
+        # Restore HWR version into calendar
+        ics_event = CalEvent(
+            uid=c.uid,
+            title=c.ics_title,
+            start=datetime.fromisoformat(c.ics_start),
+            end=datetime.fromisoformat(c.ics_end),
+            location=c.ics_location,
+            description="",
+        )
+        if c.cal_title:
+            backend.update([ics_event])
+            click.echo("Restored HWR version in calendar.")
+        else:
+            new_ids = backend.insert([ics_event])
+            # Update cal_id in state
+            state = load_state()
+            if c.uid in state:
+                state[c.uid].cal_id = new_ids.get(c.uid, "")
+                _save_state_dict(state)
+            click.echo("Restored HWR version in calendar.")
+
+
+def _save_state_dict(state) -> None:
+    from hwr_sync.state import STATE_PATH
+    import json
+    from dataclasses import asdict
+    data = {uid: asdict(m) for uid, m in state.items()}
+    STATE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+
     """Open config.yaml in your default editor (~/.config/hwr-sync/config.yaml)."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
