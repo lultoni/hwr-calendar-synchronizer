@@ -13,7 +13,8 @@ study_start_date: "2024-10-01"
 
 # Your full semester plan.
 # course: use "kurs" if your faculty has no a/b/c split, otherwise "kursa"/"kursb"/"kursc"
-# end_date: last day of that semester (the sync auto-stops after the final semester)
+# end_date: last day of that semester incl. internship/Praxisphase
+# filters: optional — overrides the global filters block below for this semester only
 semesters:
   - number: 1
     course: "kursa"
@@ -29,17 +30,30 @@ semesters:
     end_date: "2026-09-30"
   - number: 5
     course: "kursa"
-    end_date: "2027-03-31"
+    end_date: "2027-01-31"
+    filters:
+      groups:
+        # Drop ALL WPF events, except the two you actually chose
+        - match_regex: "(?i)WPF"
+          keep:
+            - "My WPF Course A"
+            - "My WPF Course B"
   - number: 6
     course: "kursa"
     end_date: "2027-09-30"
+    filters:
+      groups:
+        - match_regex: "(?i)WPF"
+          keep:
+            - "My WPF Course C"
+            - "My WPF Course D"
 
 # Name of the calendar to sync into (must already exist in your calendar app)
 calendar_name: "University"
 
 # Calendar backend.
 # "auto" detects your OS on first run and writes the detected value here.
-# Supported: auto | apple | caldav | google | ics_file
+# Supported: auto | apple | caldav | ics_file
 calendar_backend: "auto"
 
 # CalDAV server URL — only needed when calendar_backend is "caldav"
@@ -48,18 +62,23 @@ calendar_backend: "auto"
 # How often to sync (in hours)
 sync_interval_hours: 6
 
-# Event filters — all optional, leave lists empty to disable
+# Global filters — applied to all semesters that have no filters block of their own.
+# Leave everything empty to keep all events.
 filters:
-  # Drop any event whose title contains one of these strings (case-insensitive)
+  # Always drop events whose title contains one of these (case-insensitive substring)
   exclude_title_contains: []
-  #  - "Social Innovation"
-  #  - "Cross Cultural Management"
+  #  - "Wegezeit"
 
-  # Keep ONLY events whose title contains one of these strings (case-insensitive)
-  # Leave empty to keep everything that isn't excluded above
-  include_title_contains: []
-  #  - "WPF"
-
-  # Drop events matching any of these Python-style regular expressions
+  # Always drop events matching one of these Python regular expressions
   exclude_by_regex: []
   #  - "^Englisch.*B1$"
+
+  # Group filters: for each group, drop all matching events except those in keep.
+  # You can define multiple independent groups.
+  groups: []
+  # - match_regex: "(?i)WPF"
+  #   keep:
+  #     - "My Chosen Elective"
+  # - match_regex: "(?i)Englisch"
+  #   keep:
+  #     - "Englisch C1"

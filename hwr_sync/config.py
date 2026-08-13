@@ -21,10 +21,19 @@ class SemesterConfig:
 
 
 @dataclass
+class GroupFilter:
+    match_regex: str   # identifies which events belong to this group
+    keep: list[str]    # titles to keep from that group (case-insensitive substring)
+
+
+@dataclass
 class FilterConfig:
+    # Always drop events whose title contains any of these (case-insensitive substring)
     exclude_title_contains: list[str] = field(default_factory=list)
-    include_title_contains: list[str] = field(default_factory=list)
+    # Always drop events matching any of these regexes
     exclude_by_regex: list[str] = field(default_factory=list)
+    # Per-group selection: drop everything in a group except explicitly kept titles
+    groups: list[GroupFilter] = field(default_factory=list)
 
 
 @dataclass
@@ -106,10 +115,14 @@ def build_ics_url(faculty: str, semester_number: int, course: str) -> str:
 
 
 def _parse_filters(f: dict) -> "FilterConfig":
+    groups = [
+        GroupFilter(match_regex=g["match_regex"], keep=g.get("keep", []))
+        for g in f.get("groups", [])
+    ]
     return FilterConfig(
         exclude_title_contains=f.get("exclude_title_contains", []),
-        include_title_contains=f.get("include_title_contains", []),
         exclude_by_regex=f.get("exclude_by_regex", []),
+        groups=groups,
     )
 
 
