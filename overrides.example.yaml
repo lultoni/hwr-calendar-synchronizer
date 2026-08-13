@@ -1,0 +1,27 @@
+# HWR Calendar Synchronizer — Overrides
+# Copy this file to overrides.yaml to activate it.
+# Run `hwr-sync overrides` to open this file in your editor.
+#
+# Find the UID of an event by running `hwr-sync status --list-uids` (coming soon)
+# or by opening the ICS file directly.
+#
+# Supported override fields:
+#   title     — rename the event in your calendar
+#   location  — override the room/link
+#   notes     — append a personal note to the event description
+#   cancelled — set to true to mark the event as cancelled (title gets "[CANCELLED]" prefix)
+#
+# NOTE: Overrides are never overwritten by the sync. If the ICS changes for an
+# overridden event, you will see a conflict warning in the log — but your override
+# stays in place until you remove it manually.
+
+overrides:
+  # Example: a lecture that was cancelled by the professor
+  # "HWR-WI-1051-20260827T080000":
+  #   title: "FPM (fällt aus)"
+  #   cancelled: true
+
+  # Example: room change communicated via email
+  # "HWR-WI-5054-20261103T100000":
+  #   location: "Zoom: https://hwr-berlin.zoom.us/j/123456"
+  #   notes: "Link vom Prof per Mail, 02.11."
