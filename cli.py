@@ -11,14 +11,21 @@ from pathlib import Path
 import click
 
 from hwr_sync import scheduler
-from hwr_sync.config import CONFIG_PATH, OVERRIDES_PATH, load_config
-from hwr_sync.state import STATE_PATH, load_state
+from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, OVERRIDES_PATH, load_config
+from hwr_sync.state import load_state
 from hwr_sync.sync import sync
+
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_PATH = CONFIG_DIR / "hwr-sync.log"
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_PATH),
+    ],
 )
 
 
@@ -65,12 +72,10 @@ def status():
 
     now = datetime.now(tz=timezone.utc)
 
-    # Scheduler
     running = scheduler.is_installed()
     click.echo(f"Scheduler:      {'running' if running else 'stopped'}")
     click.echo(f"Interval:       every {config.sync_interval_hours}h")
 
-    # Active semester
     from hwr_sync.config import get_current_semester
     sem = get_current_semester(config, now)
     if sem:
@@ -78,14 +83,11 @@ def status():
     else:
         click.echo("Active semester: none (study period complete)")
 
-    # State
     state = load_state()
     click.echo(f"Managed events: {len(state)}")
 
-    # Log tail
-    log_path = Path("hwr-sync.log")
-    if log_path.exists():
-        lines = log_path.read_text().splitlines()
+    if LOG_PATH.exists():
+        lines = LOG_PATH.read_text().splitlines()
         last = next(
             (l for l in reversed(lines) if "Sync complete" in l or "Syncing semester" in l),
             None,
@@ -96,32 +98,50 @@ def status():
 
 @main.command()
 def settings():
-    """Open config.yaml in your default editor."""
+    """Open config.yaml in your default editor (~/.config/hwr-sync/config.yaml)."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
-        example = Path("config.example.yaml")
-        if example.exists():
-            import shutil
-            shutil.copy(example, CONFIG_PATH)
-            click.echo(f"Created {CONFIG_PATH} from example. Opening...")
-        else:
-            click.echo(f"{CONFIG_PATH} not found. Create it from config.example.yaml first.")
-            sys.exit(1)
+        _copy_example("config.example.yaml", CONFIG_PATH)
     _open_in_editor(CONFIG_PATH)
 
 
 @main.command("overrides")
 def overrides_cmd():
-    """Open overrides.yaml in your default editor."""
+    """Open overrides.yaml in your default editor (~/.config/hwr-sync/overrides.yaml)."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not OVERRIDES_PATH.exists():
-        example = Path("overrides.example.yaml")
-        if example.exists():
-            import shutil
-            shutil.copy(example, OVERRIDES_PATH)
-            click.echo(f"Created {OVERRIDES_PATH} from example. Opening...")
-        else:
-            OVERRIDES_PATH.write_text("overrides:\n")
-            click.echo(f"Created empty {OVERRIDES_PATH}. Opening...")
+        _copy_example("overrides.example.yaml", OVERRIDES_PATH, fallback="overrides:\n")
     _open_in_editor(OVERRIDES_PATH)
+
+
+def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> None:
+    import importlib.resources
+    import shutil
+
+    # Try installed package data first
+    try:
+        ref = importlib.resources.files("hwr_sync") / ".." / filename
+        src = Path(str(ref))
+        if src.exists():
+            shutil.copy(src, dest)
+            click.echo(f"Created {dest}. Opening...")
+            return
+    except Exception:
+        pass
+
+    # Fall back to file next to the package (dev install)
+    local = Path(__file__).parent / filename
+    if local.exists():
+        shutil.copy(local, dest)
+        click.echo(f"Created {dest}. Opening...")
+        return
+
+    if fallback:
+        dest.write_text(fallback)
+        click.echo(f"Created {dest}. Opening...")
+    else:
+        click.echo(f"Could not find {filename}. Create {dest} manually.")
+        sys.exit(1)
 
 
 def _open_in_editor(path: Path) -> None:
@@ -135,7 +155,6 @@ def _open_in_editor(path: Path) -> None:
     elif system == "Windows":
         os.startfile(str(path))  # type: ignore
     else:
-        # Try common editors
         for ed in ("xdg-open", "nano", "vim", "vi"):
             if subprocess.run(["which", ed], capture_output=True).returncode == 0:
                 subprocess.run([ed, str(path)])

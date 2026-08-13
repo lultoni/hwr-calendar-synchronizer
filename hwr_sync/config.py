@@ -8,8 +8,9 @@ from typing import Any
 
 import yaml
 
-CONFIG_PATH = Path("config.yaml")
-OVERRIDES_PATH = Path("overrides.yaml")
+CONFIG_DIR = Path.home() / ".config" / "hwr-sync"
+CONFIG_PATH = CONFIG_DIR / "config.yaml"
+OVERRIDES_PATH = CONFIG_DIR / "overrides.yaml"
 
 
 @dataclass
@@ -49,10 +50,12 @@ class Config:
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         raise FileNotFoundError(
             f"Config file not found: {path}\n"
-            "Copy config.example.yaml to config.yaml and fill in your details."
+            f"Copy config.example.yaml to {path} and fill in your details.\n"
+            f"Or run: cp /path/to/hwr-calendar-synchronizer/config.example.yaml {path}"
         )
     raw = yaml.safe_load(path.read_text())
 

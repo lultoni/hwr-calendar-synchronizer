@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-STATE_PATH = Path("state.json")
+from hwr_sync.config import CONFIG_DIR
+STATE_PATH = CONFIG_DIR / "state.json"
 
 
 @dataclass
