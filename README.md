@@ -1,140 +1,107 @@
 # HWR Calendar Synchronizer
 
-Automatically syncs your HWR Berlin timetable into Apple Calendar, CalDAV (iCloud, Nextcloud, ...), or a subscribable ICS file — on macOS, Linux, and Windows.
+Syncs your HWR Berlin timetable into your calendar automatically. Runs as a background job, diffs every change against what HWR last published, and respects edits you make in your calendar app — without ever silently overwriting them.
 
-Runs as a background job that checks for changes every few hours. Smart diff: only adds, updates, or deletes events that actually changed. Manual overrides are never overwritten.
+Works on macOS, Linux, and Windows. Supports Apple Calendar, CalDAV (iCloud, Nextcloud, ...), and static ICS export.
 
 ---
 
-## Quick Start
+## How it works
 
-### For Techies
+Each sync pass:
+1. Fetches the ICS from HWR and applies your course filters
+2. Reads your calendar to check which managed events are still there and how they look
+3. Diffs ICS (what HWR says) vs state (what HWR said last time) vs calendar (what you have now)
+4. Applies clean changes — new events added, changed events updated, removed events deleted
+5. Records divergences (things you changed or deleted) as conflicts for you to review
+
+You are the source of truth. If you delete or modify an event, the sync never silently overwrites it — it flags a conflict and waits for your decision.
+
+---
+
+## Setup
+
+### Quick (for developers)
 
 ```bash
-# 1. Clone and enter the project
 git clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
 
-# 2. Install uv (if you don't have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
-# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Install uv if needed
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 3. Install hwr-sync as a global CLI tool
-uv tool install -e .
-
-# macOS only — for native Apple Calendar integration
+# Install (macOS — includes Apple Calendar support)
 uv tool install -e ".[apple]"
 
-# 4. Create your config (must be run from the project directory)
-cp config.example.yaml config.yaml
-hwr-sync settings   # opens config.yaml in your editor
+# Linux / Windows
+uv tool install -e .
 
-# 5. Run once to test
+# Configure
+cp config.example.yaml ~/.config/hwr-sync/config.yaml
+hwr-sync settings
+
+# Test
 hwr-sync run
 
-# 6. Start the background scheduler
+# Enable background sync
 hwr-sync start
 ```
 
----
+### Step by step (for everyone)
 
-### For Non-Techies (step by step)
+**1 — Install Python 3.11+**
 
-Don't worry — you only need to do this once.
+Download from [python.org/downloads](https://python.org/downloads). On Windows, check "Add Python to PATH" during install.
 
-**Step 1 — Install Python**
+**2 — Install uv**
 
-- Go to [python.org/downloads](https://python.org/downloads) and download Python 3.11 or newer.
-- During installation on Windows: check "Add Python to PATH".
-- On macOS you can also use the Terminal app and run: `brew install python` (if you have Homebrew).
-
-**Step 2 — Install uv (a package manager)**
-
-Open your Terminal (macOS/Linux) or Command Prompt (Windows) and paste:
-
-```
-# macOS / Linux:
+```bash
+# macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Windows (in PowerShell):
+# Windows (PowerShell)
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**Step 3 — Download this project**
+**3 — Download and install**
 
-```
+```bash
 git clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
+uv tool install -e .          # Linux / Windows
+uv tool install -e ".[apple]" # macOS
 ```
 
-No git? Download the ZIP from GitHub and unzip it, then open a terminal in that folder.
+**4 — Configure**
 
-**Step 4 — Install the tool**
-
-```
-uv tool install -e .
-```
-
-On macOS, add this too for Apple Calendar support:
-```
-uv tool install -e ".[apple]"
-```
-
-This makes `hwr-sync` available as a command anywhere on your system.
-
-**Step 5 — Configure**
-
-```
-cp config.example.yaml config.yaml
+```bash
+cp config.example.yaml ~/.config/hwr-sync/config.yaml
 hwr-sync settings
 ```
 
-A text file opens. Fill in:
-- `faculty`: your degree program (e.g. `wi` for Wirtschaftsinformatik)
-- `semesters`: your course group per semester (see the HWR timetable page), including end dates
-- `calendar_name`: the name of the calendar in your app (create one called `University` first)
+Fill in your faculty, semester dates, course groups, and which calendar to sync into. The file is documented with examples.
 
-Save and close the file.
+**5 — Run and start**
 
-**Step 6 — Test it**
-
-```
-hwr-sync run
+```bash
+hwr-sync run    # test — check your calendar app after this
+hwr-sync start  # enable automatic background sync
 ```
 
-Open your calendar app — your timetable should appear.
+### AI-assisted setup
 
-**Step 7 — Make it automatic**
-
-```
-hwr-sync start
-```
-
-Done. The tool now syncs in the background every few hours.
-
----
-
-## AI-Assisted Setup
-
-Paste the following prompt directly into Claude, ChatGPT, or any other AI assistant. It will walk you through the complete setup interactively — cloning the repo, installing everything, and filling in your config together with you.
+Paste this into Claude, ChatGPT, or any AI assistant — it will install everything and fill in your config interactively:
 
 ```
-I want to set up hwr-calendar-synchronizer on my computer. Please help me through the complete setup.
+I want to set up hwr-calendar-synchronizer. Please guide me through the full setup.
 
-Here is what I need you to do:
-1. Check if git, Python 3.11+ and uv are installed on my system, and guide me through installing any that are missing.
-2. Clone the repository: https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer
-3. cd into the project directory and run: uv tool install -e ".[apple]" (macOS) or uv tool install -e . (Linux/Windows)
-4. Ask me the following questions one at a time, then write my config.yaml:
-   - What is your faculty/degree program? (e.g. wi, informatik, IP, industrie)
-   - For each semester: what is your course group? (kursa, kursb, kursc, or kurs) and when does it end?
-   - Do you have elective modules (WPF)? If so, which ones are yours?
-   - What should the calendar be called in your calendar app?
-   - Which calendar app do you use? (Apple Calendar, iCloud CalDAV, Google Calendar, or just export a file)
-5. Run `hwr-sync run` to test and confirm events appear.
-6. Run `hwr-sync start` to enable automatic background sync.
+1. Check if git, Python 3.11+ and uv are installed; help me install anything missing.
+2. Clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer and install it.
+3. Ask me one at a time: faculty, semester dates and course groups, which calendar app I use, what to name the calendar.
+4. Write my config.yaml based on my answers.
+5. Run `hwr-sync run` to test, then `hwr-sync start` to enable background sync.
 
-Start by asking me what operating system I am on.
+Start by asking what OS I'm on.
 ```
 
 ---
@@ -143,25 +110,43 @@ Start by asking me what operating system I am on.
 
 | Command | What it does |
 |---|---|
-| `hwr-sync run` | Sync once right now |
-| `hwr-sync start` | Register background scheduler + immediate sync |
+| `hwr-sync run` | Run one sync pass now |
+| `hwr-sync start` | Register background scheduler + sync immediately |
 | `hwr-sync stop` | Remove background scheduler |
 | `hwr-sync status` | Show scheduler state, active semester, last sync |
-| `hwr-sync settings` | Open `config.yaml` in your editor |
-| `hwr-sync overrides` | Open `overrides.yaml` in your editor |
+| `hwr-sync conflicts` | Review and resolve calendar conflicts interactively |
+| `hwr-sync settings` | Open config.yaml in your editor |
+| `hwr-sync overrides` | Open overrides.yaml in your editor |
 | `hwr-sync --help` | Show all commands |
-
-> **Note:** `hwr-sync settings` and `hwr-sync overrides` open files in the directory where you run the command. Always run `hwr-sync` from the project directory, or set an absolute path in a shell alias.
 
 ---
 
-## Filters
+## Configuration
 
-Edit `config.yaml` to control which courses appear in your calendar.
+Config lives at `~/.config/hwr-sync/config.yaml`. Run `hwr-sync settings` to open it.
 
-### Hard excludes
+### Semesters
 
-Always drop specific events, no exceptions:
+```yaml
+faculty: "wi"
+study_start_date: "2024-10-01"
+
+semesters:
+  - number: 5
+    course: "kursa"          # kursa / kursb / kursc / kurs (if no split)
+    end_date: "2027-01-31"   # include Praxisphase
+  - number: 6
+    course: "kursa"
+    end_date: "2027-09-30"
+```
+
+The tool auto-detects the active semester from today's date and stops syncing after the last `end_date`.
+
+### Filters
+
+Each semester can define its own filters. Leave the global `filters` block empty to keep all events by default.
+
+**Hard exclude** — always drop these, no exceptions:
 
 ```yaml
 filters:
@@ -171,25 +156,7 @@ filters:
     - "^Englisch.*B1$"
 ```
 
-### Group filters (for elective modules / WPF)
-
-Drop all events in a group, except the ones you actually chose. You can define multiple independent groups:
-
-```yaml
-filters:
-  groups:
-    - match_regex: "(?i)WPF"
-      keep:
-        - "Cross Cultural Management"
-        - "Social Innovation"
-    - match_regex: "(?i)Englisch"
-      keep:
-        - "Englisch C1"
-```
-
-### Per-semester filters
-
-Each semester can have its own `filters` block that overrides the global one — useful when your electives change each semester:
+**Group filter** — drop all events matching a pattern, except the ones you actually chose. Use this for elective modules (WPF). Multiple independent groups are supported:
 
 ```yaml
 semesters:
@@ -202,80 +169,94 @@ semesters:
           keep:
             - "Cross Cultural Management"
             - "Social Innovation"
-  - number: 6
-    course: "kursa"
-    end_date: "2027-09-30"
-    filters:
-      groups:
-        - match_regex: "(?i)WPF"
-          keep:
-            - "Design Thinking"
-            - "Responsible Tech"
 ```
+
+### Calendar backend
+
+```yaml
+calendar_name: "University"
+calendar_backend: "auto"   # detected on first run and saved
+```
+
+| Backend | Use when |
+|---|---|
+| `apple` | macOS with Apple Calendar (auto-detected) |
+| `caldav` | iCloud, Nextcloud, any CalDAV — also set `caldav_url` |
+| `ics_file` | Export a static `.ics` file to subscribe to from any app |
 
 ---
 
-## Manual Overrides
+## Conflicts
 
-If a professor cancels a class or changes the room via email, you can override that event without it being overwritten on the next sync.
+When you edit or delete an event in your calendar, the next sync detects the divergence and records it — it never silently overwrites your change.
 
-Run `hwr-sync overrides` to open `overrides.yaml`. Add an entry like this:
+Run `hwr-sync conflicts` to review them interactively:
+
+```
+1/2 ───────────────────────────────
+  Event:  FPM — Führung und Personalmanagement
+  Status: You deleted this — HWR still has it
+
+  HWR version:
+    Start:    2026-09-03T08:00:00+00:00
+    Location: CL: 6B.353
+
+Choice (k, r, s):
+  k — keep deleted
+  r — restore from HWR
+  s — skip, decide later
+```
+
+You can skip any item and come back to it later. The tool only considers a conflict resolved once you explicitly choose.
+
+---
+
+## Manual overrides
+
+For one-off changes like a cancelled class or a room swap communicated by email, use `hwr-sync overrides` to open `overrides.yaml`:
 
 ```yaml
 overrides:
-  "YOUR-EVENT-UID-HERE":
+  "sked.de1234567":
     title: "FPM (fällt aus)"
     cancelled: true
 
-  "ANOTHER-UID":
+  "sked.de7654321":
     location: "Zoom: https://hwr-berlin.zoom.us/j/123456"
     notes: "Link from Prof email, 02.11."
 ```
 
-The UID of an event is the `UID:` field in the raw ICS — visible in the log when running `hwr-sync run`.
-
-Overrides are **never overwritten** by the sync. If the ICS changes for an overridden event, you'll see a warning in the log — your override stays until you remove it manually.
+Overridden events are never touched by the sync. If HWR changes an overridden event, you'll see a conflict notification.
 
 ---
 
-## Scheduler Behavior
+## Scheduler
 
-| Platform | Mechanism | Survives sleep? | Survives shutdown? |
+`hwr-sync start` registers a native OS scheduler. `hwr-sync stop` removes it.
+
+| Platform | Mechanism | After sleep | After shutdown |
 |---|---|---|---|
-| macOS | launchd (`RunAtLoad` + `StartInterval`) | Yes (catch-up on wake) | Runs on next login |
-| Linux | systemd timer (`Persistent=true`) | Yes | Yes (runs on next boot) |
-| Windows | Task Scheduler (interval + logon trigger) | Yes | Runs on next logon |
+| macOS | launchd (`StartInterval` + `RunAtLoad`) | Catches up on wake | Runs on next login |
+| Linux | systemd timer (`Persistent=true`) | Catches up on wake | Runs on next boot |
+| Windows | Task Scheduler (interval + logon trigger) | Catches up on wake | Runs on next logon |
 
 ---
 
-## Calendar Backends
-
-| Backend | When to use |
-|---|---|
-| `apple` | macOS with Apple Calendar (auto-detected on macOS) |
-| `caldav` | iCloud, Nextcloud, any CalDAV server — set `caldav_url` in config |
-| `ics_file` | Generates a `hwr_schedule.ics` file you can subscribe to in any app |
-
-`calendar_backend: auto` detects your OS on first run and writes the result to `config.yaml`.
-
----
-
-## Project Structure
+## Project structure
 
 ```
-hwr-calendar-synchronizer/
-├── hwr_sync/
-│   ├── sync.py          # single sync pass (the core)
-│   ├── fetcher.py       # ICS download + parse (uses temp file, auto-deleted)
-│   ├── filter.py        # course filters
-│   ├── diff.py          # change detection (all scenarios)
-│   ├── state.py         # local state (state.json)
-│   ├── config.py        # config + URL construction + semester detection
-│   ├── notify.py        # OS-agnostic desktop notifications
-│   ├── backends/        # apple | caldav | ics_file
-│   └── scheduler/       # launchd | systemd | wintask
-├── cli.py               # hwr-sync commands
-├── config.example.yaml  # copy to config.yaml and fill in your details
-├── overrides.example.yaml
-└── pyproject.toml
+hwr_sync/
+  sync.py        # single sync pass
+  fetcher.py     # ICS download + parse (temp file, auto-deleted)
+  filter.py      # course filters
+  diff.py        # ICS vs state vs calendar — all change scenarios
+  conflicts.py   # conflict storage and resolution
+  state.py       # persists last-known ICS state
+  config.py      # config loading, URL construction, semester detection
+  notify.py      # OS-agnostic desktop notifications
+  backends/      # apple | caldav | ics_file
+  scheduler/     # launchd | systemd | wintask
+cli.py           # hwr-sync commands
+config.example.yaml
+overrides.example.yaml
 ```
