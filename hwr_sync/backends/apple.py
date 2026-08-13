@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from hwr_sync.backends.base import CalendarBackend
 from hwr_sync.fetcher import CalEvent
 from hwr_sync.state import ManagedEvent
@@ -18,7 +20,30 @@ class AppleCalendarBackend(CalendarBackend):
             )
         self._ek = EventKit
         self._store = EventKit.EKEventStore.alloc().init()
+        self._request_access()
         self._calendar = self._get_or_raise(calendar_name)
+
+    def _request_access(self) -> None:
+        """Request full calendar access (required on macOS 14+)."""
+        import EventKit  # type: ignore
+
+        done = threading.Event()
+        result = {"granted": False, "error": None}
+
+        def handler(granted, error):
+            result["granted"] = granted
+            result["error"] = error
+            done.set()
+
+        self._store.requestFullAccessToEventsWithCompletion_(handler)
+        done.wait(timeout=10)
+
+        if not result["granted"]:
+            raise PermissionError(
+                "Apple Calendar access denied.\n"
+                "Go to System Settings → Privacy & Security → Calendars "
+                "and allow access for Terminal (or your app)."
+            )
 
     def _get_or_raise(self, name: str):
         calendars = self._store.calendarsForEntityType_(0)  # EKEntityTypeEvent = 0
@@ -37,14 +62,16 @@ class AppleCalendarBackend(CalendarBackend):
             ek_event = self._ek.EKEvent.eventWithEventStore_(self._store)
             _populate(ek_event, e)
             ek_event.setCalendar_(self._calendar)
-            self._store.saveEvent_span_error_(ek_event, 0, None)
+            ok, err = self._store.saveEvent_span_commit_error_(ek_event, 0, True, None)
+            if not ok:
+                raise RuntimeError(f"Failed to save event '{e.title}': {err}")
 
     def update(self, events: list[CalEvent]) -> None:
         for e in events:
             existing = self._find_by_uid(e.uid)
             if existing:
                 _populate(existing, e)
-                self._store.saveEvent_span_error_(existing, 0, None)
+                self._store.saveEvent_span_commit_error_(existing, 0, True, None)
             else:
                 self.insert([e])
 
@@ -52,7 +79,7 @@ class AppleCalendarBackend(CalendarBackend):
         for e in events:
             existing = self._find_by_uid(e.uid)
             if existing:
-                self._store.removeEvent_span_error_(existing, 0, None)
+                self._store.removeEvent_span_commit_error_(existing, 0, True, None)
 
     def _find_by_uid(self, uid: str):
         import objc  # type: ignore

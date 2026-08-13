@@ -43,7 +43,9 @@ def start():
     scheduler.install(config.sync_interval_hours)
     click.echo(f"Scheduler started (every {config.sync_interval_hours}h).")
     click.echo("Running initial sync...")
-    run.invoke(click.Context(run))
+    active = sync()
+    if not active:
+        click.echo("Study period is over. Run `hwr-sync stop` to remove the scheduler.")
 
 
 @main.command()
