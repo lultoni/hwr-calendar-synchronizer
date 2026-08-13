@@ -24,9 +24,29 @@ class CalDAVBackend(CalendarBackend):
             )
         self._cal = match
 
-    def insert(self, events: list[CalEvent]) -> None:
+    def read_managed(self, uids: set[str]) -> dict[str, CalEvent]:
+        from hwr_sync.fetcher import _parse_ics
+        from pathlib import Path
+        import tempfile, uuid as _uuid
+
+        found: dict[str, CalEvent] = {}
+        for uid in uids:
+            try:
+                event = self._cal.event_by_uid(uid)
+                tmp = Path(tempfile.gettempdir()) / f"hwr_sync_{_uuid.uuid4().hex}.ics"
+                tmp.write_bytes(event.data)
+                events = _parse_ics(tmp)
+                tmp.unlink()
+                if events:
+                    found[uid] = events[0]
+            except Exception:
+                pass
+        return found
+
+    def insert(self, events: list[CalEvent]) -> dict[str, str]:
         for e in events:
             self._cal.save_event(_to_ical(e))
+        return {e.uid: e.uid for e in events}  # CalDAV uses UID natively
 
     def update(self, events: list[CalEvent]) -> None:
         for e in events:

@@ -29,10 +29,14 @@ class ICSFileBackend(CalendarBackend):
         for e in _parse_ics(self._path):
             self._events[e.uid] = e
 
-    def insert(self, events: list[CalEvent]) -> None:
+    def read_managed(self, uids: set[str]) -> dict[str, CalEvent]:
+        return {uid: e for uid, e in self._events.items() if uid in uids}
+
+    def insert(self, events: list[CalEvent]) -> dict[str, str]:
         for e in events:
             self._events[e.uid] = e
         self._write()
+        return {e.uid: e.uid for e in events}
 
     def update(self, events: list[CalEvent]) -> None:
         for e in events:
