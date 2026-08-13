@@ -34,7 +34,8 @@ def sync() -> bool:
     all_events = fetch_ics(url)
 
     events = filter_past(all_events, now)
-    events = apply_filters(events, config.filters)
+    active_filters = semester.filters if semester.filters is not None else config.filters
+    events = apply_filters(events, active_filters)
 
     state = load_state()
     overrides = load_overrides()

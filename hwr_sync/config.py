@@ -17,6 +17,7 @@ class SemesterConfig:
     number: int
     course: str
     end_date: date
+    filters: "FilterConfig | None" = None  # overrides global filters when set
 
 
 @dataclass
@@ -51,17 +52,14 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             number=s["number"],
             course=s["course"],
             end_date=_parse_date(s["end_date"]),
+            filters=_parse_filters(s["filters"]) if "filters" in s else None,
         )
         for s in raw.get("semesters", [])
     ]
     semesters.sort(key=lambda s: s.number)
 
     f = raw.get("filters", {})
-    filters = FilterConfig(
-        exclude_title_contains=f.get("exclude_title_contains", []),
-        include_title_contains=f.get("include_title_contains", []),
-        exclude_by_regex=f.get("exclude_by_regex", []),
-    )
+    filters = _parse_filters(f)
 
     return Config(
         faculty=raw["faculty"],
@@ -105,6 +103,14 @@ BASE_URL = (
 
 def build_ics_url(faculty: str, semester_number: int, course: str) -> str:
     return BASE_URL.format(faculty=faculty, number=semester_number, course=course)
+
+
+def _parse_filters(f: dict) -> "FilterConfig":
+    return FilterConfig(
+        exclude_title_contains=f.get("exclude_title_contains", []),
+        include_title_contains=f.get("include_title_contains", []),
+        exclude_by_regex=f.get("exclude_by_regex", []),
+    )
 
 
 def _parse_date(value: Any) -> date:

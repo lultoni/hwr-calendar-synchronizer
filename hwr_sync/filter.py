@@ -16,16 +16,19 @@ def apply_filters(events: list[CalEvent], cfg: FilterConfig) -> list[CalEvent]:
     for event in events:
         title_lower = event.title.lower()
 
+        # Include list always wins — if the title matches, keep regardless of excludes
+        if cfg.include_title_contains:
+            if any(inc.lower() in title_lower for inc in cfg.include_title_contains):
+                result.append(event)
+                continue
+
         if any(ex.lower() in title_lower for ex in cfg.exclude_title_contains):
             continue
 
         if any(re.search(pattern, event.title) for pattern in cfg.exclude_by_regex):
             continue
 
-        if cfg.include_title_contains:
-            if not any(inc.lower() in title_lower for inc in cfg.include_title_contains):
-                continue
-
+        # No include list set, or not matched — keep if not excluded
         result.append(event)
 
     return result
