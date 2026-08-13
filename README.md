@@ -19,15 +19,13 @@ cd hwr-calendar-synchronizer
 curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
 # Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 3. Create virtual environment and install dependencies
-uv venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-uv pip install -e .
+# 3. Install hwr-sync as a global CLI tool
+uv tool install -e .
 
 # macOS only — for native Apple Calendar integration
-uv pip install -e ".[apple]"
+uv tool install -e ".[apple]"
 
-# 4. Create your config
+# 4. Create your config (must be run from the project directory)
 cp config.example.yaml config.yaml
 hwr-sync settings   # opens config.yaml in your editor
 
@@ -74,15 +72,15 @@ No git? Download the ZIP from GitHub and unzip it, then open a terminal in that 
 **Step 4 — Install the tool**
 
 ```
-uv venv
-source .venv/bin/activate
-uv pip install -e .
+uv tool install -e .
 ```
 
 On macOS, add this too for Apple Calendar support:
 ```
-uv pip install -e ".[apple]"
+uv tool install -e ".[apple]"
 ```
+
+This makes `hwr-sync` available as a command anywhere on your system.
 
 **Step 5 — Configure**
 
@@ -93,7 +91,7 @@ hwr-sync settings
 
 A text file opens. Fill in:
 - `faculty`: your degree program (e.g. `wi` for Wirtschaftsinformatik)
-- `semesters`: your course group per semester (see the HWR timetable page)
+- `semesters`: your course group per semester (see the HWR timetable page), including end dates
 - `calendar_name`: the name of the calendar in your app (create one called `University` first)
 
 Save and close the file.
@@ -126,12 +124,11 @@ I want to set up hwr-calendar-synchronizer on my computer. Please help me throug
 Here is what I need you to do:
 1. Check if git, Python 3.11+ and uv are installed on my system, and guide me through installing any that are missing.
 2. Clone the repository: https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer
-3. Run the install commands (uv venv, activate, uv pip install).
+3. cd into the project directory and run: uv tool install -e ".[apple]" (macOS) or uv tool install -e . (Linux/Windows)
 4. Ask me the following questions one at a time, then write my config.yaml:
    - What is your faculty/degree program? (e.g. wi, informatik, IP, industrie)
-   - When did your studies start? (month and year)
-   - For each semester (1–6): what is your course group? (kursa, kursb, kursc, or kurs)
-   - When does each semester end? (approximate month and year is fine)
+   - For each semester: what is your course group? (kursa, kursb, kursc, or kurs) and when does it end?
+   - Do you have elective modules (WPF)? If so, which ones are yours?
    - What should the calendar be called in your calendar app?
    - Which calendar app do you use? (Apple Calendar, iCloud CalDAV, Google Calendar, or just export a file)
 5. Run `hwr-sync run` to test and confirm events appear.
@@ -154,6 +151,68 @@ Start by asking me what operating system I am on.
 | `hwr-sync overrides` | Open `overrides.yaml` in your editor |
 | `hwr-sync --help` | Show all commands |
 
+> **Note:** `hwr-sync settings` and `hwr-sync overrides` open files in the directory where you run the command. Always run `hwr-sync` from the project directory, or set an absolute path in a shell alias.
+
+---
+
+## Filters
+
+Edit `config.yaml` to control which courses appear in your calendar.
+
+### Hard excludes
+
+Always drop specific events, no exceptions:
+
+```yaml
+filters:
+  exclude_title_contains:
+    - "Wegezeit"
+  exclude_by_regex:
+    - "^Englisch.*B1$"
+```
+
+### Group filters (for elective modules / WPF)
+
+Drop all events in a group, except the ones you actually chose. You can define multiple independent groups:
+
+```yaml
+filters:
+  groups:
+    - match_regex: "(?i)WPF"
+      keep:
+        - "Cross Cultural Management"
+        - "Social Innovation"
+    - match_regex: "(?i)Englisch"
+      keep:
+        - "Englisch C1"
+```
+
+### Per-semester filters
+
+Each semester can have its own `filters` block that overrides the global one — useful when your electives change each semester:
+
+```yaml
+semesters:
+  - number: 5
+    course: "kursa"
+    end_date: "2027-01-31"
+    filters:
+      groups:
+        - match_regex: "(?i)WPF"
+          keep:
+            - "Cross Cultural Management"
+            - "Social Innovation"
+  - number: 6
+    course: "kursa"
+    end_date: "2027-09-30"
+    filters:
+      groups:
+        - match_regex: "(?i)WPF"
+          keep:
+            - "Design Thinking"
+            - "Responsible Tech"
+```
+
 ---
 
 ## Manual Overrides
@@ -173,7 +232,7 @@ overrides:
     notes: "Link from Prof email, 02.11."
 ```
 
-To find the UID of an event: run `hwr-sync run` with verbose logging, or inspect the ICS file directly. The UID is the `UID:` field in the raw ICS.
+The UID of an event is the `UID:` field in the raw ICS — visible in the log when running `hwr-sync run`.
 
 Overrides are **never overwritten** by the sync. If the ICS changes for an overridden event, you'll see a warning in the log — your override stays until you remove it manually.
 
@@ -193,27 +252,11 @@ Overrides are **never overwritten** by the sync. If the ICS changes for an overr
 
 | Backend | When to use |
 |---|---|
-| `apple` | macOS with Apple Calendar (auto-detected) |
+| `apple` | macOS with Apple Calendar (auto-detected on macOS) |
 | `caldav` | iCloud, Nextcloud, any CalDAV server — set `caldav_url` in config |
 | `ics_file` | Generates a `hwr_schedule.ics` file you can subscribe to in any app |
 
 `calendar_backend: auto` detects your OS on first run and writes the result to `config.yaml`.
-
----
-
-## Filters
-
-Edit `config.yaml` to exclude or include courses by title:
-
-```yaml
-filters:
-  exclude_title_contains:
-    - "Social Innovation"
-    - "Cross Cultural Management"
-  include_title_contains: []   # empty = keep everything not excluded
-  exclude_by_regex:
-    - "^Englisch.*B1$"
-```
 
 ---
 
@@ -232,7 +275,7 @@ hwr-calendar-synchronizer/
 │   ├── backends/        # apple | caldav | ics_file
 │   └── scheduler/       # launchd | systemd | wintask
 ├── cli.py               # hwr-sync commands
-├── config.example.yaml  # copy to config.yaml
+├── config.example.yaml  # copy to config.yaml and fill in your details
 ├── overrides.example.yaml
 └── pyproject.toml
 ```
