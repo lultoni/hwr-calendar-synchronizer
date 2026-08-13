@@ -7,7 +7,8 @@ from hwr_sync.fetcher import CalEvent
 
 
 def filter_past(events: list[CalEvent], now) -> list[CalEvent]:
-    return [e for e in events if e.start >= now]
+    # Keep events that haven't ended yet — avoids deleting currently-running events
+    return [e for e in events if e.end >= now]
 
 
 def apply_filters(events: list[CalEvent], cfg: FilterConfig) -> list[CalEvent]:
