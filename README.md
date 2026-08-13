@@ -2,7 +2,7 @@
 
 Syncs your HWR Berlin timetable into your calendar automatically. Runs as a background job, diffs every change against what HWR last published, and respects edits you make in your calendar app — without ever silently overwriting them.
 
-Works on macOS, Linux, and Windows. Supports Apple Calendar, CalDAV (iCloud, Nextcloud, ...), and static ICS export.
+Works on macOS (Apple Calendar), and any platform with a CalDAV server (iCloud, Nextcloud, ...). Linux and Windows CalDAV support is functional; native calendar backends for those platforms are not yet implemented (see [open items](#open-items)).
 
 ---
 
@@ -10,27 +10,43 @@ Works on macOS, Linux, and Windows. Supports Apple Calendar, CalDAV (iCloud, Nex
 
 Each sync pass:
 1. Fetches the ICS from HWR and applies your course filters
-2. Reads your calendar to check which managed events are still there and how they look
-3. Diffs ICS (what HWR says) vs state (what HWR said last time) vs calendar (what you have now)
-4. Applies clean changes — new events added, changed events updated, removed events deleted
+2. Reads your calendar to check which managed events are still there
+3. Diffs ICS (what HWR says now) vs state (what HWR said last time) vs calendar (what you have)
+4. Applies clean changes — adds new events, updates changed ones, deletes removed ones
 5. Records divergences (things you changed or deleted) as conflicts for you to review
 
-You are the source of truth. If you delete or modify an event, the sync never silently overwrites it — it flags a conflict and waits for your decision.
+You are the source of truth. If you delete or modify an event, the sync never silently overwrites it — it flags a conflict and waits for your decision via `hwr-sync conflicts`.
 
 ---
 
 ## Setup
 
-### Quick (for developers)
+### AI-assisted (recommended)
+
+Paste this into Claude, ChatGPT, or any AI assistant — it installs everything and configures your settings interactively:
+
+```
+I want to set up hwr-calendar-synchronizer. Please guide me through the full setup.
+
+1. Check if git, Python 3.11+ and uv are installed; help me install anything missing.
+2. Clone https://github.com/lultoni/hwr-calendar-synchronizer and install it.
+3. Ask me one at a time: faculty, semester dates and course groups, which calendar app I use, what to name the calendar.
+4. Write my config.yaml based on my answers.
+5. Run `hwr-sync run` to test, then `hwr-sync start` to enable background sync.
+
+Start by asking what OS I'm on.
+```
+
+### Manual (quick)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer.git
+git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
 
 # Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install (macOS — includes Apple Calendar support)
+# macOS (includes Apple Calendar support)
 uv tool install -e ".[apple]"
 
 # Linux / Windows
@@ -40,14 +56,12 @@ uv tool install -e .
 cp config.example.yaml ~/.config/hwr-sync/config.yaml
 hwr-sync settings
 
-# Test
+# Test, then enable background sync
 hwr-sync run
-
-# Enable background sync
 hwr-sync start
 ```
 
-### Step by step (for everyone)
+### Manual (step by step)
 
 **1 — Install Python 3.11+**
 
@@ -66,10 +80,10 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 **3 — Download and install**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer.git
+git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
-uv tool install -e .          # Linux / Windows
-uv tool install -e ".[apple]" # macOS
+uv tool install -e .           # Linux / Windows
+uv tool install -e ".[apple]"  # macOS
 ```
 
 **4 — Configure**
@@ -88,22 +102,6 @@ hwr-sync run    # test — check your calendar app after this
 hwr-sync start  # enable automatic background sync
 ```
 
-### AI-assisted setup
-
-Paste this into Claude, ChatGPT, or any AI assistant — it will install everything and fill in your config interactively:
-
-```
-I want to set up hwr-calendar-synchronizer. Please guide me through the full setup.
-
-1. Check if git, Python 3.11+ and uv are installed; help me install anything missing.
-2. Clone https://github.com/YOUR_USERNAME/hwr-calendar-synchronizer and install it.
-3. Ask me one at a time: faculty, semester dates and course groups, which calendar app I use, what to name the calendar.
-4. Write my config.yaml based on my answers.
-5. Run `hwr-sync run` to test, then `hwr-sync start` to enable background sync.
-
-Start by asking what OS I'm on.
-```
-
 ---
 
 ## Commands
@@ -114,7 +112,7 @@ Start by asking what OS I'm on.
 | `hwr-sync start` | Register background scheduler + sync immediately |
 | `hwr-sync stop` | Remove background scheduler |
 | `hwr-sync status` | Show scheduler state, active semester, last sync |
-| `hwr-sync conflicts` | Review and resolve calendar conflicts interactively |
+| `hwr-sync conflicts` | Check for new conflicts and resolve existing ones |
 | `hwr-sync settings` | Open config.yaml in your editor |
 | `hwr-sync overrides` | Open overrides.yaml in your editor |
 | `hwr-sync --help` | Show all commands |
@@ -133,7 +131,7 @@ study_start_date: "2024-10-01"
 
 semesters:
   - number: 5
-    course: "kursa"          # kursa / kursb / kursc / kurs (if no split)
+    course: "kursa"          # kursa / kursb / kursc / kurs (if no a/b/c split)
     end_date: "2027-01-31"   # include Praxisphase
   - number: 6
     course: "kursa"
@@ -178,11 +176,13 @@ calendar_name: "University"
 calendar_backend: "auto"   # detected on first run and saved
 ```
 
-| Backend | Use when |
-|---|---|
-| `apple` | macOS with Apple Calendar (auto-detected) |
-| `caldav` | iCloud, Nextcloud, any CalDAV — also set `caldav_url` |
-| `ics_file` | Export a static `.ics` file to subscribe to from any app |
+| Backend | Use when | Platform |
+|---|---|---|
+| `apple` | Apple Calendar (auto-detected on macOS) | macOS only |
+| `caldav` | iCloud, Nextcloud, any CalDAV server — also set `caldav_url` | All platforms |
+| `ics_file` | Export a static `.ics` file to import into any calendar app | All platforms |
+
+> **Note on `ics_file`:** This generates a local file (`hwr_schedule.ics`) that you can import manually into any calendar app. It does **not** create a live subscription link — that would require hosting the file on an HTTPS server. For a one-click subscription, use the `caldav` backend with iCloud or Nextcloud.
 
 ---
 
@@ -190,7 +190,7 @@ calendar_backend: "auto"   # detected on first run and saved
 
 When you edit or delete an event in your calendar, the next sync detects the divergence and records it — it never silently overwrites your change.
 
-Run `hwr-sync conflicts` to review them interactively:
+Run `hwr-sync conflicts` to review them. It first runs a fresh sync to catch any new changes, then steps through each conflict:
 
 ```
 1/2 ───────────────────────────────
@@ -207,7 +207,7 @@ Choice (k, r, s):
   s — skip, decide later
 ```
 
-You can skip any item and come back to it later. The tool only considers a conflict resolved once you explicitly choose.
+After each item you can skip the rest and come back later. Conflicts stay open until you explicitly resolve them.
 
 ---
 
@@ -239,6 +239,17 @@ Overridden events are never touched by the sync. If HWR changes an overridden ev
 | macOS | launchd (`StartInterval` + `RunAtLoad`) | Catches up on wake | Runs on next login |
 | Linux | systemd timer (`Persistent=true`) | Catches up on wake | Runs on next boot |
 | Windows | Task Scheduler (interval + logon trigger) | Catches up on wake | Runs on next logon |
+
+---
+
+## Open items
+
+Contributions welcome. These are the known gaps:
+
+- **Google Calendar backend** — scaffolded in `backends/google.py` but not implemented
+- **Windows native calendar backend** — currently only CalDAV works on Windows
+- **Linux native calendar backend** — currently only CalDAV works on Linux
+- **ICS subscription link** — would require a small local HTTP server or external hosting; not currently included
 
 ---
 

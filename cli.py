@@ -99,7 +99,12 @@ def status():
 
 @main.command("conflicts")
 def conflicts_cmd():
-    """Review and resolve calendar conflicts interactively."""
+    """Check for new conflicts and resolve existing ones interactively."""
+    # Always do a fresh check first so we see current state
+    click.echo("Checking for conflicts...")
+    from hwr_sync.sync import sync
+    sync()
+
     conflicts = load_conflicts()
     if not conflicts:
         click.echo("No conflicts. Everything is in sync.")
@@ -109,7 +114,6 @@ def conflicts_cmd():
     click.echo("Options per item:  [k] keep yours  [r] restore from HWR  [s] skip (decide later)\n")
 
     backend = None  # lazy init
-
     resolved = []
     skipped = []
 
@@ -130,24 +134,21 @@ def conflicts_cmd():
         if choice == "s":
             skipped.append(c)
             click.echo("Skipped — will show again next time.\n")
-            continue
+        else:
+            if backend is None:
+                from hwr_sync.backends import get_backend
+                backend = get_backend(load_config())
+            _execute_resolution(c, choice, backend)
+            resolved.append(c.uid)
+            click.echo()
 
-        # Execute chosen action
-        if backend is None:
-            from hwr_sync.backends import get_backend
-            backend = get_backend(load_config())
-
-        _execute_resolution(c, choice, backend)
-        resolved.append(c.uid)
-        click.echo()
-
-        # After new items, offer to skip the rest
-        if i < len(conflicts) - 1 and skipped == [] and resolved:
-            if click.confirm(f"  {len(conflicts) - i - 1} item(s) left — skip the rest for now?", default=False):
+        # Offer to skip remaining after first resolution
+        remaining = len(conflicts) - i - 1
+        if remaining > 0 and (resolved or skipped):
+            if click.confirm(f"  {remaining} item(s) left — skip the rest for now?", default=False):
                 skipped.extend(conflicts[i+1:])
                 break
 
-    # Persist: remove resolved, keep skipped
     for uid in resolved:
         remove_conflict(uid)
 

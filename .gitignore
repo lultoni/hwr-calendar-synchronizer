@@ -2,6 +2,11 @@
 config.yaml
 overrides.yaml
 state.json
+conflicts.json
+
+# Generated ICS export
+*.ics
+hwr_schedule.ics
 
 # Python
 __pycache__/
