@@ -90,6 +90,16 @@ If the calendar named in your config doesn't exist in Apple Calendar yet, `hwr-s
 
 ---
 
+## Updating
+
+```bash
+cd hwr-calendar-synchronizer
+git pull
+uv tool install -e ".[apple]" --reinstall
+```
+
+---
+
 ## Commands
 
 | Command | What it does |
