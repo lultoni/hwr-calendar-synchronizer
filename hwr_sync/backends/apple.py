@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from datetime import datetime, timezone
 
@@ -11,7 +12,7 @@ from hwr_sync.state import ManagedEvent
 class AppleCalendarBackend(CalendarBackend):
     """Uses pyobjc EventKit to write directly to Apple Calendar (macOS only)."""
 
-    def __init__(self, calendar_name: str) -> None:
+    def __init__(self, calendar_name: str, create_missing_calendar: bool = False) -> None:
         try:
             import EventKit  # type: ignore
         except ImportError:
@@ -22,7 +23,7 @@ class AppleCalendarBackend(CalendarBackend):
         self._ek = EventKit
         self._store = EventKit.EKEventStore.alloc().init()
         self._request_access()
-        self._calendar = self._get_or_raise(calendar_name)
+        self._calendar = self._get_or_create(calendar_name, create_missing_calendar)
 
     def _request_access(self) -> None:
         done = threading.Event()
@@ -42,17 +43,46 @@ class AppleCalendarBackend(CalendarBackend):
                 "and allow access for Terminal (or your app)."
             )
 
-    def _get_or_raise(self, name: str):
+    def _get_or_create(self, name: str, create_if_missing: bool):
         calendars = self._store.calendarsForEntityType_(0)
         for cal in calendars:
             if cal.title() == name:
                 return cal
+
         available = [c.title() for c in calendars]
-        raise ValueError(
-            f"Calendar '{name}' not found in Apple Calendar.\n"
-            f"Available calendars: {available}\n"
-            "Create it in Apple Calendar first, then update calendar_name in config.yaml."
+        available_str = "\n".join(f"  - {c}" for c in sorted(available))
+
+        if create_if_missing:
+            return self._create_calendar(name)
+
+        import click
+        click.echo(
+            f"\nCalendar '{name}' not found in Apple Calendar.\n"
+            f"Available calendars:\n{available_str}\n"
         )
+        if click.confirm(f"Create calendar '{name}' now?", default=True):
+            return self._create_calendar(name)
+
+        click.echo(
+            f"\nCreate a calendar named '{name}' in Apple Calendar, "
+            "then run `hwr-sync run` again.\n"
+            "Or update calendar_name in your config: `hwr-sync settings`"
+        )
+        sys.exit(1)
+
+    def _create_calendar(self, name: str):
+        import Foundation  # type: ignore
+        cal = self._ek.EKCalendar.calendarForEntityType_eventStore_(0, self._store)
+        cal.setTitle_(name)
+        sources = self._store.sources()
+        # Prefer local source (type 0); fall back to first available
+        local = next((s for s in sources if s.sourceType() == 0), None) or sources[0]
+        cal.setSource_(local)
+        ok, err = self._store.saveCalendar_commit_error_(cal, True, None)
+        if not ok:
+            raise RuntimeError(f"Failed to create calendar '{name}': {err}")
+        print(f"[hwr-sync] Created calendar '{name}' in Apple Calendar.")
+        return cal
 
     def read_managed(self, uids: set[str]) -> dict[str, CalEvent]:
         """Look up managed events by their stored calendarItemIdentifier."""
@@ -128,13 +158,3 @@ def _nsdate_to_datetime(nsdate) -> datetime:
 def _to_nsdate(dt):
     import Foundation  # type: ignore
     return Foundation.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
-
-
-def _ns_date_far_past():
-    import Foundation  # type: ignore
-    return Foundation.NSDate.dateWithTimeIntervalSince1970_(0)
-
-
-def _ns_date_far_future():
-    import Foundation  # type: ignore
-    return Foundation.NSDate.dateWithTimeIntervalSince1970_(9999999999)

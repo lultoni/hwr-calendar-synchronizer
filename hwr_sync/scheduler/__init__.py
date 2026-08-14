@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import platform
+import sys
 
 
 def _get_impl():
-    system = platform.system()
-    if system == "Darwin":
-        from hwr_sync.scheduler import launchd as impl
-    elif system == "Linux":
-        from hwr_sync.scheduler import systemd as impl
-    elif system == "Windows":
-        from hwr_sync.scheduler import wintask as impl
-    else:
-        raise OSError(f"Unsupported platform: {system}")
-    return impl
+    if platform.system() != "Darwin":
+        print(
+            "[hwr-sync] This tool currently supports macOS only.\n"
+            "Linux and Windows support is planned for a future release."
+        )
+        sys.exit(1)
+    from hwr_sync.scheduler import launchd
+    return launchd
 
 
 def install(interval_hours: int) -> None:
@@ -25,4 +24,7 @@ def uninstall() -> None:
 
 
 def is_installed() -> bool:
-    return _get_impl().is_installed()
+    if platform.system() != "Darwin":
+        return False
+    from hwr_sync.scheduler import launchd
+    return launchd.is_installed()

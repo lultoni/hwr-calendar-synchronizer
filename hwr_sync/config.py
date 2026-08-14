@@ -10,7 +10,6 @@ import yaml
 
 CONFIG_DIR = Path.home() / ".config" / "hwr-sync"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
-OVERRIDES_PATH = CONFIG_DIR / "overrides.yaml"
 
 
 @dataclass
@@ -54,8 +53,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     if not path.exists():
         raise FileNotFoundError(
             f"Config file not found: {path}\n"
-            f"Copy config.example.yaml to {path} and fill in your details.\n"
-            f"Or run: cp /path/to/hwr-calendar-synchronizer/config.example.yaml {path}"
+            f"Run `hwr-sync settings` to create and open it.\n"
+            f"See https://github.com/lultoni/hwr-calendar-synchronizer#configuration for the expected format."
         )
     raw = yaml.safe_load(path.read_text())
 
@@ -90,13 +89,6 @@ def save_backend(backend: str, path: Path = CONFIG_PATH) -> None:
     raw = yaml.safe_load(path.read_text())
     raw["calendar_backend"] = backend
     path.write_text(yaml.dump(raw, allow_unicode=True, sort_keys=False))
-
-
-def load_overrides(path: Path = OVERRIDES_PATH) -> dict[str, dict[str, Any]]:
-    if not path.exists():
-        return {}
-    raw = yaml.safe_load(path.read_text()) or {}
-    return raw.get("overrides", {}) or {}
 
 
 def get_current_semester(config: Config, now: datetime) -> SemesterConfig | None:

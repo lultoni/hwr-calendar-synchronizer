@@ -11,8 +11,8 @@ from pathlib import Path
 import click
 
 from hwr_sync import scheduler
-from hwr_sync.conflicts import Conflict, load_conflicts, remove_conflict, clear_conflicts
-from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, OVERRIDES_PATH, load_config
+from hwr_sync.conflicts import Conflict, load_conflicts, remove_conflict
+from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, load_config
 from hwr_sync.state import load_state
 from hwr_sync.sync import sync
 
@@ -36,22 +36,35 @@ def main():
 
 
 @main.command()
-def run():
+@click.option("--create-missing-calendar", is_flag=True, default=False,
+              help="Create the calendar in Apple Calendar if it doesn't exist.")
+def run(create_missing_calendar: bool):
     """Run a single sync pass right now."""
-    active = sync()
+    try:
+        active = sync(create_missing_calendar=create_missing_calendar)
+    except KeyboardInterrupt:
+        click.echo("\nAborted.")
+        sys.exit(0)
     if not active:
         click.echo("Study period is over. Run `hwr-sync stop` to remove the scheduler.")
         sys.exit(0)
 
 
 @main.command()
-def start():
+@click.option("--create-missing-calendar", is_flag=True, default=False,
+              help="Create the calendar in Apple Calendar if it doesn't exist.")
+def start(create_missing_calendar: bool):
     """Register the OS scheduler and run an immediate sync."""
     config = load_config()
     scheduler.install(config.sync_interval_hours)
     click.echo(f"Scheduler started (every {config.sync_interval_hours}h).")
+    click.echo(f"Logs: {LOG_PATH}")
     click.echo("Running initial sync...")
-    active = sync()
+    try:
+        active = sync(create_missing_calendar=create_missing_calendar)
+    except KeyboardInterrupt:
+        click.echo("\nAborted.")
+        sys.exit(0)
     if not active:
         click.echo("Study period is over. Run `hwr-sync stop` to remove the scheduler.")
 
@@ -85,7 +98,7 @@ def status():
         click.echo("Active semester: none (study period complete)")
 
     state = load_state()
-    click.echo(f"Managed events: {len(state)}")
+    click.echo(f"Events in sync: {len(state)}")
 
     if LOG_PATH.exists():
         lines = LOG_PATH.read_text().splitlines()
@@ -100,10 +113,12 @@ def status():
 @main.command("conflicts")
 def conflicts_cmd():
     """Check for new conflicts and resolve existing ones interactively."""
-    # Always do a fresh check first so we see current state
     click.echo("Checking for conflicts...")
-    from hwr_sync.sync import sync
-    sync()
+    try:
+        sync(emit_notifications=False)
+    except KeyboardInterrupt:
+        click.echo("\nAborted.")
+        sys.exit(0)
 
     conflicts = load_conflicts()
     if not conflicts:
@@ -117,37 +132,43 @@ def conflicts_cmd():
     resolved = []
     skipped = []
 
-    for i, c in enumerate(conflicts):
-        click.echo(f"─── {i+1}/{len(conflicts)} ───────────────────────────────")
-        _print_conflict(c)
+    try:
+        for i, c in enumerate(conflicts):
+            click.echo(f"─── {i+1}/{len(conflicts)} ───────────────────────────────")
+            _print_conflict(c)
 
-        options = _conflict_options(c)
-        choice = None
-        while choice not in options:
-            choice = click.prompt(
-                "Choice",
-                default="s",
-                show_choices=True,
-                type=click.Choice(list(options.keys()) + ["s"]),
-            )
+            options = _conflict_options(c)
+            choice = None
+            while choice not in options:
+                choice = click.prompt(
+                    "Choice",
+                    default="s",
+                    show_choices=True,
+                    type=click.Choice(list(options.keys()) + ["s"]),
+                )
 
-        if choice == "s":
-            skipped.append(c)
-            click.echo("Skipped — will show again next time.\n")
-        else:
-            if backend is None:
-                from hwr_sync.backends import get_backend
-                backend = get_backend(load_config())
-            _execute_resolution(c, choice, backend)
-            resolved.append(c.uid)
-            click.echo()
+            if choice == "s":
+                skipped.append(c)
+                click.echo("Skipped — will show again next time.\n")
+            else:
+                if backend is None:
+                    from hwr_sync.backends import get_backend
+                    backend = get_backend(load_config())
+                _execute_resolution(c, choice, backend)
+                resolved.append(c.uid)
+                click.echo()
 
-        # Offer to skip remaining after first resolution
-        remaining = len(conflicts) - i - 1
-        if remaining > 0 and (resolved or skipped):
-            if click.confirm(f"  {remaining} item(s) left — skip the rest for now?", default=False):
-                skipped.extend(conflicts[i+1:])
-                break
+            remaining = len(conflicts) - i - 1
+            if remaining > 0 and (resolved or skipped):
+                if click.confirm(f"  {remaining} item(s) left — skip the rest for now?", default=False):
+                    skipped.extend(conflicts[i+1:])
+                    break
+
+    except KeyboardInterrupt:
+        # Count remaining unvisited as skipped
+        visited = len(resolved) + len(skipped)
+        skipped.extend(conflicts[visited:])
+        click.echo("\n\nInterrupted — saving progress so far.")
 
     for uid in resolved:
         remove_conflict(uid)
@@ -155,11 +176,37 @@ def conflicts_cmd():
     click.echo(f"\nDone. {len(resolved)} resolved, {len(skipped)} left open.")
 
 
+@main.command("settings")
+def settings_cmd():
+    """Open config.yaml in your editor (~/.config/hwr-sync/config.yaml). Creates it if missing."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        _copy_example("config.example.yaml", CONFIG_PATH)
+    _open_in_editor(CONFIG_PATH)
+
+
+@main.command("config")
+def config_cmd():
+    """Alias for `hwr-sync settings`."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        _copy_example("config.example.yaml", CONFIG_PATH)
+    _open_in_editor(CONFIG_PATH)
+
+
+def _fmt_dt(iso: str) -> str:
+    """Convert an ISO datetime string to a human-readable local time string."""
+    if not iso:
+        return ""
+    dt = datetime.fromisoformat(iso).astimezone()
+    return dt.strftime("%a, %d. %b %Y, %H:%M")
+
+
 def _print_conflict(c: Conflict) -> None:
     KIND_LABELS = {
-        "user_deleted":            "You deleted this — HWR still has it",
-        "user_modified":           "You modified this — HWR hasn't changed it",
-        "both_changed":            "Both you and HWR changed this",
+        "user_deleted":             "You deleted this — HWR still has it",
+        "user_modified":            "You modified this — HWR hasn't changed it",
+        "both_changed":             "Both you and HWR changed this",
         "hwr_changed_user_deleted": "You deleted this AND HWR changed it",
     }
     click.echo(f"  Event:  {c.title}")
@@ -169,16 +216,16 @@ def _print_conflict(c: Conflict) -> None:
     if c.ics_title:
         click.echo(f"  HWR version:")
         click.echo(f"    Title:    {c.ics_title}")
-        click.echo(f"    Start:    {c.ics_start}")
-        click.echo(f"    End:      {c.ics_end}")
+        click.echo(f"    Start:    {_fmt_dt(c.ics_start)}")
+        click.echo(f"    End:      {_fmt_dt(c.ics_end)}")
         if c.ics_location:
             click.echo(f"    Location: {c.ics_location}")
 
     if c.cal_title:
         click.echo(f"  Your version:")
         click.echo(f"    Title:    {c.cal_title}")
-        click.echo(f"    Start:    {c.cal_start}")
-        click.echo(f"    End:      {c.cal_end}")
+        click.echo(f"    Start:    {_fmt_dt(c.cal_start)}")
+        click.echo(f"    End:      {_fmt_dt(c.cal_end)}")
         if c.cal_location:
             click.echo(f"    Location: {c.cal_location}")
     click.echo()
@@ -199,16 +246,12 @@ def _conflict_options(c: Conflict) -> dict[str, str]:
 def _execute_resolution(c: Conflict, choice: str, backend) -> None:
     from hwr_sync.fetcher import CalEvent
     from hwr_sync.state import load_state, save_state
-    from datetime import datetime, timezone
 
     if choice == "k":
-        # Keep user's version — update state hash to match current calendar
-        # so next sync doesn't flag it again
         state = load_state()
         if c.uid in state:
             managed = state[c.uid]
             if c.cal_title:
-                # User modified: store calendar version as new ICS baseline
                 from hwr_sync.state import ManagedEvent, make_hash
                 cal_event = CalEvent(
                     uid=c.uid,
@@ -220,13 +263,11 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> None:
                 )
                 managed.event_hash = make_hash(cal_event)
             else:
-                # User deleted: remove from state entirely
                 del state[c.uid]
             _save_state_dict(state)
         click.echo("Kept your version.")
 
     elif choice == "r":
-        # Restore HWR version into calendar
         ics_event = CalEvent(
             uid=c.uid,
             title=c.ics_title,
@@ -240,7 +281,6 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> None:
             click.echo("Restored HWR version in calendar.")
         else:
             new_ids = backend.insert([ics_event])
-            # Update cal_id in state
             state = load_state()
             if c.uid in state:
                 state[c.uid].cal_id = new_ids.get(c.uid, "")
@@ -256,30 +296,12 @@ def _save_state_dict(state) -> None:
     STATE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-
-    """Open config.yaml in your default editor (~/.config/hwr-sync/config.yaml)."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if not CONFIG_PATH.exists():
-        _copy_example("config.example.yaml", CONFIG_PATH)
-    _open_in_editor(CONFIG_PATH)
-
-
-@main.command("overrides")
-def overrides_cmd():
-    """Open overrides.yaml in your default editor (~/.config/hwr-sync/overrides.yaml)."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if not OVERRIDES_PATH.exists():
-        _copy_example("overrides.example.yaml", OVERRIDES_PATH, fallback="overrides:\n")
-    _open_in_editor(OVERRIDES_PATH)
-
-
 def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> None:
     import importlib.resources
     import shutil
 
-    # Try installed package data first
     try:
-        ref = importlib.resources.files("hwr_sync") / ".." / filename
+        ref = importlib.resources.files("hwr_sync") / filename
         src = Path(str(ref))
         if src.exists():
             shutil.copy(src, dest)
@@ -288,7 +310,7 @@ def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> Non
     except Exception:
         pass
 
-    # Fall back to file next to the package (dev install)
+    # Dev-install fallback: file lives next to this module
     local = Path(__file__).parent / filename
     if local.exists():
         shutil.copy(local, dest)
@@ -311,8 +333,6 @@ def _open_in_editor(path: Path) -> None:
         subprocess.run([editor, str(path)])
     elif system == "Darwin":
         subprocess.run(["open", "-t", str(path)])
-    elif system == "Windows":
-        os.startfile(str(path))  # type: ignore
     else:
         for ed in ("xdg-open", "nano", "vim", "vi"):
             if subprocess.run(["which", ed], capture_output=True).returncode == 0:

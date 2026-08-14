@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
+
+from hwr_sync.config import CONFIG_DIR
 
 PLIST_NAME = "com.hwr-sync.plist"
 LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
@@ -12,9 +13,9 @@ LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 def install(interval_hours: int) -> None:
     LAUNCH_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
     plist_path = LAUNCH_AGENTS_DIR / PLIST_NAME
-    executable = sys.executable
-    script_dir = Path.cwd()
 
+    hwr_sync_bin = str(Path(sys.executable).parent / "hwr-sync")
+    log_path = str(CONFIG_DIR / "hwr-sync.log")
     interval_seconds = interval_hours * 3600
 
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -26,21 +27,17 @@ def install(interval_hours: int) -> None:
     <string>com.hwr-sync</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{executable}</string>
-        <string>-m</string>
-        <string>cli</string>
+        <string>{hwr_sync_bin}</string>
         <string>run</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>{script_dir}</string>
     <key>StartInterval</key>
     <integer>{interval_seconds}</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{script_dir}/hwr-sync.log</string>
+    <string>{log_path}</string>
     <key>StandardErrorPath</key>
-    <string>{script_dir}/hwr-sync.log</string>
+    <string>{log_path}</string>
 </dict>
 </plist>
 """

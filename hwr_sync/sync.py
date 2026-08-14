@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from hwr_sync.backends import get_backend
-from hwr_sync.config import build_ics_url, get_current_semester, load_config, load_overrides
+from hwr_sync.config import build_ics_url, get_current_semester, load_config
 from hwr_sync.conflicts import Conflict, add_conflicts
 from hwr_sync.diff import compute_diff
 from hwr_sync.fetcher import fetch_ics
@@ -15,7 +15,7 @@ from hwr_sync.state import load_state, save_state
 logger = logging.getLogger("hwr_sync")
 
 
-def sync() -> bool:
+def sync(emit_notifications: bool = True, create_missing_calendar: bool = False) -> bool:
     """Single sync pass. Returns True if sync ran, False if study period is over."""
     config = load_config()
     now = datetime.now(tz=timezone.utc)
@@ -34,11 +34,18 @@ def sync() -> bool:
     active_filters = semester.filters if semester.filters is not None else config.filters
     events = apply_filters(events, active_filters)
 
-    # 2. Load state (= what HWR said last sync) and overrides
+    # 2. Load state (= what HWR said last sync)
+    #    Drop past events silently — they fell out of the ICS naturally and
+    #    must not be deleted from the calendar by the diff.
     state = load_state()
+    state = {
+        uid: m for uid, m in state.items()
+        if datetime.fromisoformat(m.end) >= now
+        or uid in {e.uid for e in events}
+    }
 
     # 3. Read current calendar state for all managed UIDs
-    backend = get_backend(config)
+    backend = get_backend(config, create_missing_calendar=create_missing_calendar)
     calendar = backend.read_managed(set(state.keys()))
 
     # 4. Diff: ICS vs state vs calendar
@@ -54,8 +61,6 @@ def sync() -> bool:
     cal_ids.update(new_cal_ids)
 
     # 7. Save state = ICS stand (all incoming events we manage)
-    #    User-deleted and user-modified stay in state at ICS-level
-    #    so next sync can detect if HWR changes them
     save_state(events, cal_ids=cal_ids)
 
     # 8. Record divergences as conflicts for user to resolve
@@ -128,10 +133,11 @@ def sync() -> bool:
     if new_conflicts:
         add_conflicts(new_conflicts)
         logger.warning("%d new conflict(s) — run `hwr-sync conflicts` to review.", len(new_conflicts))
-        notify(
-            "HWR Sync: Conflicts",
-            f"{len(new_conflicts)} conflict(s) found — run `hwr-sync conflicts` to review.",
-        )
+        if emit_notifications:
+            notify(
+                "HWR Sync: Conflicts",
+                f"{len(new_conflicts)} conflict(s) found — run `hwr-sync conflicts` to review.",
+            )
 
     logger.info("Sync complete: %s", diff.summary())
     return True
