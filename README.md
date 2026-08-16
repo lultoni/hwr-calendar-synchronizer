@@ -86,7 +86,7 @@ hwr-sync run    # test — check your calendar app after this
 hwr-sync start  # enable automatic background sync
 ```
 
-If the calendar named in your config doesn't exist in Apple Calendar yet, `hwr-sync run` will ask you whether to create it. To skip the prompt (e.g. in automated setups), pass `--create-missing-calendar`.
+If the calendar named in your config doesn't exist in Apple Calendar yet, pass `--create-missing-calendar` to have it created automatically.
 
 ---
 
@@ -96,6 +96,7 @@ If the calendar named in your config doesn't exist in Apple Calendar yet, `hwr-s
 cd hwr-calendar-synchronizer
 git pull
 uv tool install -e ".[apple]" --reinstall
+hwr-sync stop && hwr-sync start
 ```
 
 ---
@@ -105,25 +106,31 @@ uv tool install -e ".[apple]" --reinstall
 | Command | What it does |
 |---|---|
 | `hwr-sync run` | Run one sync pass now |
-| `hwr-sync start` | Register background scheduler + sync immediately |
+| `hwr-sync start [--interval N]` | Register background scheduler + sync immediately |
 | `hwr-sync stop` | Remove background scheduler |
-| `hwr-sync status` | Show scheduler state, active semester, last sync |
-| `hwr-sync conflicts` | Check for new conflicts and resolve existing ones |
+| `hwr-sync status` | Scheduler state, next sync time, active semester, open conflicts |
+| `hwr-sync conflicts` | Resolve open conflicts interactively |
+| `hwr-sync conflicts --sync` | Scan for new conflicts first, then resolve |
 | `hwr-sync settings` | Open config.yaml in your editor (creates it if missing) |
 | `hwr-sync config` | Same as `settings` |
-| `hwr-sync --help` | Show all commands |
+| `hwr-sync --verbose` | Show debug-level output on the terminal |
+| `hwr-sync --help` | Show all commands and options |
 
 ---
 
 ## Configuration
 
 Config lives at `~/.config/hwr-sync/config.yaml`. Run `hwr-sync settings` to open it.
-Logs are written to `~/.config/hwr-sync/hwr-sync.log`.
+Logs are written to `~/.config/hwr-sync/hwr-sync.log` (rotates at 1 MB, keeps 3 files).
+
+The tool also maintains two internal files you don't normally need to touch:
+- `~/.config/hwr-sync/state.json` — last-known ICS snapshot, used to detect what HWR changed
+- `~/.config/hwr-sync/conflicts.json` — open conflicts waiting for your resolution
 
 ### Semesters
 
 ```yaml
-faculty: "wi"
+faculty: "wi"              # from the HWR calendar page (see below)
 study_start_date: "2024-10-01"
 
 semesters:
@@ -135,13 +142,15 @@ semesters:
     end_date: "2027-09-30"
 ```
 
+Find your `faculty` and `course` values in your timetable URL on the [HWR calendar page](https://moodle.hwr-berlin.de/fb2-stundenplan/). The URL pattern is `.../fb2-stundenplaene/{faculty}/semester{N}/{course}`.
+
 The tool auto-detects the active semester from today's date and stops syncing after the last `end_date`.
 
 ### Filters
 
-Each semester can define its own filters. Leave the global `filters` block empty to keep all events by default.
+Each semester can define its own filters. Leave the global `filters` block empty to keep all events.
 
-**Hard exclude** — always drop these, no exceptions:
+**Hard exclude** — always drop these:
 
 ```yaml
 filters:
@@ -151,7 +160,7 @@ filters:
     - "^Englisch.*B1$"
 ```
 
-**Group filter** — drop all events matching a pattern, except the ones you actually chose. Use this for elective modules (WPF):
+**Group filter** — drop all events matching a pattern, except the ones you actually chose. Useful for elective modules (WPF):
 
 ```yaml
 semesters:
@@ -170,48 +179,46 @@ semesters:
 
 ## Conflicts
 
-When you edit or delete an event in your calendar, the next sync detects the divergence and records it — it never silently overwrites your change.
+When you edit or delete a managed event, the sync records it as a conflict instead of overwriting your change. Room changes and renames from HWR are applied automatically — a conflict only fires when both sides diverged.
 
-Run `hwr-sync conflicts` to review them. It first runs a fresh sync to catch any new changes, then steps through each conflict:
+Run `hwr-sync conflicts` to step through them:
 
 ```
-1/2 ───────────────────────────────
+1 conflict(s) to review.
+
+Options per item:  [k] keep yours  [r] restore from HWR  [s] skip (decide later)
+
+─── 1/1 ───────────────────────────────
   Event:  FPM — Führung und Personalmanagement
   Status: You deleted this — HWR still has it
 
   HWR version:
-    Start:    Mi, 03. Sep 2026, 10:00
+    Title:    FPM — Führung und Personalmanagement
+    Start:    Wed, 03. Sep 2026, 10:00
+    End:      Wed, 03. Sep 2026, 12:00
     Location: CL: 6B.353
 
-Choice (k, r, s):
-  k — keep deleted
-  r — restore from HWR
-  s — skip, decide later
+Choice (k, r, s) [s]:
 ```
 
-After each item you can skip the rest and come back later. Conflicts stay open until you explicitly resolve them.
+After each item you can skip the rest and come back later. Conflicts stay open until you explicitly resolve them. Pass `--sync` to run a fresh sync pass before the review session if you want to pick up anything new first.
 
 ---
 
 ## Scheduler
 
-`hwr-sync start` registers a launchd job that runs `hwr-sync run` automatically.
+`hwr-sync start` registers a launchd job that fires at fixed clock times throughout the day. For the default 6h interval that's 00:00, 06:00, 12:00, 18:00. Clock-based scheduling means it catches up correctly after sleep or reboot — if the Mac was asleep at a scheduled time, the job runs on the next wake.
 
-| Mechanism | After sleep | After shutdown |
-|---|---|---|
-| launchd (`StartInterval` + `RunAtLoad`) | Catches up on wake | Runs on next login |
+Use `--interval N` to set a different interval. For clean divisors of 24 (1, 2, 3, 4, 6, 8, 12) all gaps are equal. For other values the fire times are still evenly spaced from midnight but the overnight gap may be shorter (e.g. `--interval 5` fires at 00, 05, 10, 15, 20 — the 20→00 gap is 4h).
 
-`hwr-sync stop` removes the job. Check `~/.config/hwr-sync/hwr-sync.log` for sync history.
+`hwr-sync stop` removes the job. `hwr-sync status` shows the next scheduled fire time.
 
 ---
 
 ## Open items
 
-Contributions welcome. These are the known gaps:
-
 - **Google Calendar backend** — requires OAuth2, not yet implemented
-- **Linux support** — no native calendar backend yet; launchd-equivalent scheduler needed
-- **Windows support** — no native calendar backend yet; Task Scheduler integration needed
+- **Linux / Windows support** — no native calendar backend or scheduler integration yet
 
 ---
 

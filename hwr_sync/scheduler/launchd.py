@@ -42,9 +42,18 @@ def _bootout(plist_path: Path) -> None:
 
 
 def _calendar_intervals(interval_hours: int) -> list[dict]:
-    """Return evenly-spaced StartCalendarInterval dicts for a given hour interval."""
-    count = max(1, 24 // interval_hours)
-    return [{"Hour": i * interval_hours, "Minute": 0} for i in range(count)]
+    """Return StartCalendarInterval dicts spaced interval_hours apart from midnight.
+
+    For clean divisors of 24 (1,2,3,4,6,8,12,24) all gaps are equal.
+    For other values (e.g. 5h → 00,05,10,15,20) the overnight gap is shorter
+    than the interval, but all daytime gaps are exact.
+    """
+    times = []
+    hour = 0
+    while hour < 24:
+        times.append({"Hour": hour, "Minute": 0})
+        hour += interval_hours
+    return times
 
 
 def _resolve_binary() -> str:

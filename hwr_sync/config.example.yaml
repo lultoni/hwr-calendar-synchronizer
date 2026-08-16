@@ -6,10 +6,8 @@
 #   3. Run: hwr-sync start
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Your faculty slug.
-# Find it on the HWR timetable page: https://moodle.hwr-berlin.de/fb2-stundenplan/
-# The slug is the folder name in the timetable URL — e.g. the URL contains
-# ".../fb2-stundenplaene/wi/semester1/kursa" → faculty is "wi".
+# Your faculty — find it on the HWR calendar page: https://moodle.hwr-berlin.de/fb2-stundenplan/
+# The URL pattern is .../fb2-stundenplaene/{faculty}/semester{N}/{course} — use the faculty folder name.
 # Common values: wi | informatik | IP | industrie | bank | bauwesen | dgm | dl
 #                elektrotechnik | fm | handel | iba | immobilien | maschinenbau
 #                ppm | spedition | steuern | tourismus | versicherung
