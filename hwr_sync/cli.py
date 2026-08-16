@@ -164,18 +164,23 @@ def _next_fire_time(interval_hours: int, now: datetime) -> str:
 
 
 @main.command("conflicts")
-def conflicts_cmd():
-    """Check for new conflicts and resolve existing ones interactively."""
-    click.echo("Checking for conflicts...")
-    try:
-        sync(emit_notifications=False)
-    except KeyboardInterrupt:
-        click.echo("\nAborted.")
-        sys.exit(0)
+@click.option("--sync", "do_sync", is_flag=True, default=False,
+              help="Run a sync pass first to detect new conflicts before reviewing.")
+def conflicts_cmd(do_sync: bool):
+    """Review and resolve calendar conflicts interactively."""
+    if do_sync:
+        click.echo("Scanning for new conflicts...")
+        try:
+            sync(emit_notifications=False)
+        except KeyboardInterrupt:
+            click.echo("\nAborted.")
+            sys.exit(0)
 
     conflicts = load_conflicts()
     if not conflicts:
         click.echo("No conflicts. Everything is in sync.")
+        if not do_sync:
+            click.echo("Run `hwr-sync conflicts --sync` to scan for new ones first.")
         return
 
     click.echo(f"\n{len(conflicts)} conflict(s) to review.\n")
