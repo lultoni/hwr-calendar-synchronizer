@@ -1,60 +1,107 @@
 from __future__ import annotations
 
+import logging
+import os
+import plistlib
+import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from hwr_sync.config import CONFIG_DIR
 
+logger = logging.getLogger("hwr_sync")
+
 PLIST_NAME = "com.hwr-sync.plist"
+LABEL = "com.hwr-sync"
 LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
+
+
+def _uid() -> str:
+    return str(os.getuid())
+
+
+def _bootstrap(plist_path: Path) -> None:
+    r = subprocess.run(
+        ["launchctl", "bootstrap", f"gui/{_uid()}", str(plist_path)],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"launchctl bootstrap failed: {r.stderr.strip()}")
+
+
+def _bootout(plist_path: Path) -> None:
+    r = subprocess.run(
+        ["launchctl", "bootout", f"gui/{_uid()}", str(plist_path)],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        # bootout exits non-zero if the job wasn't loaded — that's fine
+        stderr = r.stderr.strip()
+        if stderr:
+            logger.warning("launchctl bootout: %s", stderr)
+
+
+def _calendar_intervals(interval_hours: int) -> list[dict]:
+    """Return evenly-spaced StartCalendarInterval dicts for a given hour interval."""
+    count = max(1, 24 // interval_hours)
+    return [{"Hour": i * interval_hours, "Minute": 0} for i in range(count)]
+
+
+def _resolve_binary() -> str:
+    """Return the hwr-sync binary path, preferring PATH resolution over sys.executable sibling."""
+    found = shutil.which("hwr-sync")
+    if found:
+        return found
+    # Fallback: sibling of the Python interpreter (works for uv tool installs)
+    import sys
+    fallback = str(Path(sys.executable).parent / "hwr-sync")
+    if Path(fallback).exists():
+        return fallback
+    raise FileNotFoundError(
+        f"Cannot find the hwr-sync binary.\n"
+        f"Tried: PATH lookup and {fallback}\n"
+        "Make sure hwr-sync is installed: pip install hwr-calendar-synchronizer"
+    )
 
 
 def install(interval_hours: int) -> None:
     LAUNCH_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
     plist_path = LAUNCH_AGENTS_DIR / PLIST_NAME
 
-    hwr_sync_bin = str(Path(sys.executable).parent / "hwr-sync")
+    hwr_sync_bin = _resolve_binary()
     log_path = str(CONFIG_DIR / "hwr-sync.log")
-    interval_seconds = interval_hours * 3600
 
-    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.hwr-sync</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{hwr_sync_bin}</string>
-        <string>run</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>{interval_seconds}</integer>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{log_path}</string>
-    <key>StandardErrorPath</key>
-    <string>{log_path}</string>
-</dict>
-</plist>
-"""
-    plist_path.write_text(plist)
-    subprocess.run(["launchctl", "load", str(plist_path)], check=True)
-    print(f"[hwr-sync] launchd job installed: {plist_path}")
+    plist_data = {
+        "Label": LABEL,
+        "ProgramArguments": [hwr_sync_bin, "run"],
+        "StartCalendarInterval": _calendar_intervals(interval_hours),
+        "WorkingDirectory": str(Path.home()),
+        "StandardOutPath": log_path,
+        "StandardErrorPath": log_path,
+    }
+    plist_path.write_bytes(plistlib.dumps(plist_data))
+
+    # Unload first so reinstall works cleanly (idempotent if not loaded)
+    if is_installed():
+        _bootout(plist_path)
+
+    _bootstrap(plist_path)
+    logger.info("Scheduler registered: %s", plist_path)
 
 
 def uninstall() -> None:
     plist_path = LAUNCH_AGENTS_DIR / PLIST_NAME
     if plist_path.exists():
-        subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+        _bootout(plist_path)
         plist_path.unlink()
-        print("[hwr-sync] launchd job removed.")
+        logger.info("Scheduler removed.")
     else:
-        print("[hwr-sync] No launchd job found.")
+        logger.info("No scheduler found.")
 
 
 def is_installed() -> bool:
-    return (LAUNCH_AGENTS_DIR / PLIST_NAME).exists()
+    r = subprocess.run(
+        ["launchctl", "list", LABEL],
+        capture_output=True,
+    )
+    return r.returncode == 0

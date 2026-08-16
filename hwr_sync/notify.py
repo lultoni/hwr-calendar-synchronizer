@@ -12,7 +12,13 @@ def notify(title: str, body: str) -> None:
 
 
 def _notify_macos(title: str, body: str) -> None:
-    def esc(s: str) -> str:
-        return s.replace("\\", "\\\\").replace('"', '\\"')
-    script = f'display notification "{esc(body)}" with title "{esc(title)}"'
-    subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
+    subprocess.run(
+        [
+            "osascript", "-e",
+            "on run argv\n"
+            "display notification (item 2 of argv) with title (item 1 of argv)\n"
+            "end run",
+            title, body,
+        ],
+        check=False, capture_output=True,
+    )

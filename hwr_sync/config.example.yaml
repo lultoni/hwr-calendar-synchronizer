@@ -1,20 +1,33 @@
 # HWR Calendar Synchronizer — Configuration
-# Copy this file to config.yaml and fill in your details.
-# Run `hwr-sync settings` to open config.yaml in your editor.
+# ─────────────────────────────────────────────────────────────────────────────
+# Quick start:
+#   1. Fill in faculty, study_start_date, semesters, and calendar_name below.
+#   2. Save and close this file.
+#   3. Run: hwr-sync start
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Your faculty slug (see HWR timetable page for exact values)
-# Examples: wi | informatik | IP | industrie | bank | bauwesen | dgm | dl
-#           elektrotechnik | fm | handel | iba | immobilien | maschinenbau
-#           ppm | spedition | steuern | tourismus | versicherung
+# Your faculty slug.
+# Find it on the HWR timetable page: https://moodle.hwr-berlin.de/fb2-stundenplan/
+# The slug is the folder name in the timetable URL — e.g. the URL contains
+# ".../fb2-stundenplaene/wi/semester1/kursa" → faculty is "wi".
+# Common values: wi | informatik | IP | industrie | bank | bauwesen | dgm | dl
+#                elektrotechnik | fm | handel | iba | immobilien | maschinenbau
+#                ppm | spedition | steuern | tourismus | versicherung
 faculty: "wi"
 
-# Date you started your studies (first day of semester 1)
+# First day of semester 1 — your personal Vorlesungsbeginn (e.g. "2024-10-01").
 study_start_date: "2024-10-01"
 
 # Your full semester plan.
-# course: use "kurs" if your faculty has no a/b/c split, otherwise "kursa"/"kursb"/"kursc"
-# end_date: last day of that semester incl. internship/Praxisphase
-# filters: optional — overrides the global filters block below for this semester only
+#
+# course: the course group in your timetable URL — check the URL on the HWR
+#   timetable page. It ends in "/kursa", "/kursb", "/kursc", or just "/kurs"
+#   for faculties without an a/b/c split. Use exactly that value here.
+#
+# end_date: last day of that semester INCLUDING any Praxisphase / internship.
+#   When today is past all end_dates, the scheduler stops automatically.
+#
+# filters: optional block that overrides the global filters for this semester.
 semesters:
   - number: 1
     course: "kursa"
@@ -48,7 +61,9 @@ semesters:
             - "My WPF Course C"
             - "My WPF Course D"
 
-# Name of the calendar to sync into (must already exist in your calendar app)
+# Name of the calendar to sync into.
+# This calendar must already exist in Apple Calendar before you run hwr-sync.
+# To have it created automatically, run: hwr-sync start --create-missing-calendar
 calendar_name: "University"
 
 # Calendar backend.
@@ -59,7 +74,8 @@ calendar_backend: "auto"
 # CalDAV server URL — only needed when calendar_backend is "caldav"
 # caldav_url: "https://caldav.example.com/dav/calendars/user/university/"
 
-# How often to sync (in hours)
+# How often the scheduler syncs (in hours). Default: 6.
+# You can also override this at runtime: hwr-sync start --interval 2
 sync_interval_hours: 6
 
 # Global filters — applied to all semesters that have no filters block of their own.

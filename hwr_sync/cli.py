@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import platform
 import subprocess
@@ -19,20 +20,32 @@ from hwr_sync.sync import sync
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = CONFIG_DIR / "hwr-sync.log"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_PATH),
-    ],
+# File handler: full timestamp format, rotates at 1 MB
+_file_handler = logging.handlers.RotatingFileHandler(
+    LOG_PATH, maxBytes=1_000_000, backupCount=3,
 )
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+
+# Terminal handler: message only (clean, no timestamp clutter)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(logging.Formatter("%(message)s"))
+
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _stream_handler])
 
 
 @click.group()
-def main():
+@click.option("--verbose", "-v", is_flag=True, default=False,
+              help="Enable debug-level logging to the terminal.")
+def main(verbose: bool):
     """HWR Calendar Synchronizer — sync your university timetable automatically."""
+    if verbose:
+        _stream_handler.setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        _stream_handler.setLevel(logging.INFO)
 
 
 @main.command()
@@ -51,14 +64,18 @@ def run(create_missing_calendar: bool):
 
 
 @main.command()
+@click.option("--interval", default=None, type=int,
+              help="Sync interval in hours (overrides config).")
 @click.option("--create-missing-calendar", is_flag=True, default=False,
               help="Create the calendar in Apple Calendar if it doesn't exist.")
-def start(create_missing_calendar: bool):
+def start(interval: int | None, create_missing_calendar: bool):
     """Register the OS scheduler and run an immediate sync."""
     config = load_config()
-    scheduler.install(config.sync_interval_hours)
-    click.echo(f"Scheduler started (every {config.sync_interval_hours}h).")
-    click.echo(f"Logs: {LOG_PATH}")
+    effective_interval = interval if interval is not None else config.sync_interval_hours
+    scheduler.install(effective_interval)
+    click.echo(f"Scheduler started (every {effective_interval}h).")
+    if _stream_handler.level <= logging.DEBUG:
+        click.echo(f"Logs: {LOG_PATH}")
     click.echo("Running initial sync...")
     try:
         active = sync(create_missing_calendar=create_missing_calendar)
@@ -67,6 +84,9 @@ def start(create_missing_calendar: bool):
         sys.exit(0)
     if not active:
         click.echo("Study period is over. Run `hwr-sync stop` to remove the scheduler.")
+    else:
+        click.echo(f"\n  Your timetable is up to date in '{config.calendar_name}'.")
+        click.echo("  Open Apple Calendar to check.")
 
 
 @main.command()
@@ -77,7 +97,7 @@ def stop():
 
 @main.command()
 def status():
-    """Show sync status: scheduler, last sync, active semester."""
+    """Show sync status: scheduler, last sync, active semester, open conflicts."""
     try:
         config = load_config()
     except FileNotFoundError as e:
@@ -87,8 +107,12 @@ def status():
     now = datetime.now(tz=timezone.utc)
 
     running = scheduler.is_installed()
-    click.echo(f"Scheduler:      {'running' if running else 'stopped'}")
-    click.echo(f"Interval:       every {config.sync_interval_hours}h")
+    click.echo(f"Scheduler:       {'running' if running else 'stopped'}")
+    click.echo(f"Interval:        every {config.sync_interval_hours}h")
+
+    if running:
+        next_time = _next_fire_time(config.sync_interval_hours, now)
+        click.echo(f"Next sync:       {next_time}")
 
     from hwr_sync.config import get_current_semester
     sem = get_current_semester(config, now)
@@ -98,16 +122,45 @@ def status():
         click.echo("Active semester: none (study period complete)")
 
     state = load_state()
-    click.echo(f"Events in sync: {len(state)}")
+    click.echo(f"Events in sync:  {len(state)}")
+
+    conflicts = load_conflicts()
+    if conflicts:
+        click.echo(f"Conflicts:       {len(conflicts)} open — run `hwr-sync conflicts` to review")
+    else:
+        click.echo("Conflicts:       none")
 
     if LOG_PATH.exists():
         lines = LOG_PATH.read_text().splitlines()
         last = next(
-            (l for l in reversed(lines) if "Sync complete" in l or "Syncing semester" in l),
+            (l for l in reversed(lines) if "Sync complete" in l),
             None,
         )
         if last:
-            click.echo(f"Last sync:      {last.strip()}")
+            # Strip timestamp prefix for clean display
+            parts = last.strip().split("] ", 1)
+            summary = parts[-1] if len(parts) > 1 else last.strip()
+            click.echo(f"Last sync:       {summary}")
+
+
+def _next_fire_time(interval_hours: int, now: datetime) -> str:
+    """Return a human-readable string for the next scheduled fire time."""
+    from datetime import timedelta
+    now_local = now.astimezone()
+    current_hour = now_local.hour
+    count = max(1, 24 // interval_hours)
+    fire_hours = [i * interval_hours for i in range(count)]
+    upcoming = [h for h in fire_hours if h > current_hour]
+    if upcoming:
+        next_hour = upcoming[0]
+        next_dt = now_local.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+    else:
+        next_hour = fire_hours[0]
+        next_dt = (now_local + timedelta(days=1)).replace(
+            hour=next_hour, minute=0, second=0, microsecond=0
+        )
+    label = "today" if next_dt.date() == now_local.date() else "tomorrow"
+    return next_dt.strftime(f"%H:%M {label}")
 
 
 @main.command("conflicts")
@@ -182,7 +235,11 @@ def settings_cmd():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
         _copy_example("config.example.yaml", CONFIG_PATH)
+        click.echo("Fill in your faculty, semesters, and calendar_name, then save and close.")
+    else:
+        click.echo(f"Opening {CONFIG_PATH} ...")
     _open_in_editor(CONFIG_PATH)
+    click.echo("\nRun `hwr-sync start` when you're done.")
 
 
 @main.command("config")
@@ -191,7 +248,11 @@ def config_cmd():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
         _copy_example("config.example.yaml", CONFIG_PATH)
+        click.echo("Fill in your faculty, semesters, and calendar_name, then save and close.")
+    else:
+        click.echo(f"Opening {CONFIG_PATH} ...")
     _open_in_editor(CONFIG_PATH)
+    click.echo("\nRun `hwr-sync start` when you're done.")
 
 
 def _fmt_dt(iso: str) -> str:
@@ -305,7 +366,6 @@ def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> Non
         src = Path(str(ref))
         if src.exists():
             shutil.copy(src, dest)
-            click.echo(f"Created {dest}. Opening...")
             return
     except Exception:
         pass
@@ -314,12 +374,10 @@ def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> Non
     local = Path(__file__).parent / filename
     if local.exists():
         shutil.copy(local, dest)
-        click.echo(f"Created {dest}. Opening...")
         return
 
     if fallback:
         dest.write_text(fallback)
-        click.echo(f"Created {dest}. Opening...")
     else:
         click.echo(f"Could not find {filename}. Create {dest} manually.")
         sys.exit(1)
