@@ -21,6 +21,7 @@ from hwr_sync.conflicts import (
     remove_conflict,
     resolve_conflict,
 )
+from hwr_sync.changes import clear_changes, load_changes
 from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, load_config
 from hwr_sync.state import load_state
 from hwr_sync.sync import sync
@@ -137,6 +138,23 @@ def status():
         click.echo(f"Conflicts:       {len(conflicts)} open — run `hwr-sync conflicts` to review")
     else:
         click.echo("Conflicts:       none")
+
+    changes = load_changes()
+    if changes and not changes.is_empty():
+        click.echo("\nChanges since last sync:")
+        if changes.added:
+            click.echo(f"  Added ({len(changes.added)}):")
+            for e in changes.added:
+                click.echo(f"    + {e.title}  {_fmt_dt(e.start)}")
+        if changes.updated:
+            click.echo(f"  Updated ({len(changes.updated)}):")
+            for e in changes.updated:
+                click.echo(f"    ~ {e.title}  {_fmt_dt(e.start)}")
+        if changes.deleted:
+            click.echo(f"  Deleted ({len(changes.deleted)}):")
+            for e in changes.deleted:
+                click.echo(f"    - {e.title}  {_fmt_dt(e.start)}")
+        clear_changes()
 
     if LOG_PATH.exists():
         lines = LOG_PATH.read_text().splitlines()

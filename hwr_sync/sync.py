@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from hwr_sync.backends import get_backend
 from hwr_sync.config import build_ics_url, get_current_semester, load_config
+from hwr_sync.changes import ChangeEvent, SyncChanges, save_changes
 from hwr_sync.conflicts import (
     Conflict,
     STATUS_OPEN,
@@ -96,6 +97,39 @@ def sync(emit_notifications: bool = True, create_missing_calendar: bool = False)
 
     # 9. Save state = ICS stand (all incoming events we manage)
     save_state(events, cal_ids=cal_ids)
+
+    # Record HWR-driven changes (added/updated/deleted by HWR, not by the user).
+    # Skip on the very first run (empty prior state) — everything in diff.new is
+    # initial import, not a HWR change the user needs to be notified about.
+    is_first_run = not state
+    def _ce(e) -> ChangeEvent:
+        return ChangeEvent(
+            uid=e.uid, title=e.title,
+            start=e.start.isoformat(), end=e.end.isoformat(),
+        )
+
+    hwr_changes = SyncChanges(
+        added=[] if is_first_run else [_ce(e) for e in diff.new],
+        updated=[_ce(e) for e in diff.updated],
+        deleted=[_ce(m) for m in diff.deleted],
+    )
+    save_changes(hwr_changes)
+
+    if not hwr_changes.is_empty() and emit_notifications:
+        parts = []
+        if hwr_changes.added:
+            titles = ", ".join(e.title for e in hwr_changes.added[:3])
+            suffix = f" (+{len(hwr_changes.added)-3} more)" if len(hwr_changes.added) > 3 else ""
+            parts.append(f"{len(hwr_changes.added)} added: {titles}{suffix}")
+        if hwr_changes.updated:
+            titles = ", ".join(e.title for e in hwr_changes.updated[:3])
+            suffix = f" (+{len(hwr_changes.updated)-3} more)" if len(hwr_changes.updated) > 3 else ""
+            parts.append(f"{len(hwr_changes.updated)} updated: {titles}{suffix}")
+        if hwr_changes.deleted:
+            titles = ", ".join(e.title for e in hwr_changes.deleted[:3])
+            suffix = f" (+{len(hwr_changes.deleted)-3} more)" if len(hwr_changes.deleted) > 3 else ""
+            parts.append(f"{len(hwr_changes.deleted)} deleted: {titles}{suffix}")
+        notify("HWR Sync: Timetable changed", "\n".join(parts))
 
     # 10. Record divergences as conflicts for user to resolve
     new_conflicts: list[Conflict] = []
