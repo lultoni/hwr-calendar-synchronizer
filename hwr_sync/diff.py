@@ -39,18 +39,26 @@ def compute_diff(
     incoming: list[CalEvent],
     known: dict[str, ManagedEvent],
     calendar: dict[str, CalEvent],
+    resolved_uids: set[str] | None = None,
+    resolved_edited_uids: set[str] | None = None,
 ) -> Diff:
     """
-    incoming  = filtered ICS events (what HWR says)
-    known     = state (what HWR said last sync)
-    calendar  = current calendar contents for managed UIDs
+    incoming            = filtered ICS events (what HWR says)
+    known               = state (what HWR said last sync)
+    calendar            = current calendar contents for managed UIDs
+    resolved_uids       = UIDs resolved as user_deleted — skip entirely
+    resolved_edited_uids = UIDs resolved as user_edited — skip only if still in calendar;
+                          if missing from calendar, fall through to normal conflict detection
     """
     diff = Diff()
     incoming_by_uid = {e.uid: e for e in incoming}
+    _resolved_deleted = resolved_uids or set()
+    _resolved_edited = resolved_edited_uids or set()
 
     for uid, ics_event in incoming_by_uid.items():
         if uid not in known:
-            diff.new.append(ics_event)
+            if uid not in _resolved_deleted and uid not in _resolved_edited:
+                diff.new.append(ics_event)
             continue
 
         managed = known[uid]
@@ -58,26 +66,31 @@ def compute_diff(
         in_calendar = uid in calendar
 
         if not in_calendar:
+            if uid in _resolved_deleted:
+                # User chose to keep it deleted — honour that
+                continue
+            # resolved_edited but now gone from calendar: fall through to conflict detection
             if ics_changed:
-                # HWR changed it AND user deleted it → conflict
                 diff.hwr_changed_user_deleted.append((ics_event, managed))
             else:
-                # HWR unchanged, user deleted → notify, don't re-insert
                 diff.user_deleted.append((ics_event, managed))
             continue
 
         cal_event = calendar[uid]
         cal_changed = make_hash(cal_event) != managed.event_hash
 
+        if uid in _resolved_deleted or uid in _resolved_edited:
+            # Still in calendar and resolved — treat as unchanged
+            diff.unchanged.append(ics_event)
+            continue
+
         if not ics_changed and not cal_changed:
             diff.unchanged.append(ics_event)
         elif ics_changed and not cal_changed:
             diff.updated.append(ics_event)
         elif not ics_changed and cal_changed:
-            # User modified, HWR unchanged → notify, respect user's version
             diff.user_modified.append((ics_event, managed, cal_event))
         else:
-            # Both changed → conflict
             diff.both_changed.append((ics_event, managed, cal_event))
 
     # ICS removed an event that's still in state

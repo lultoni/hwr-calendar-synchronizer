@@ -12,7 +12,15 @@ from pathlib import Path
 import click
 
 from hwr_sync import scheduler
-from hwr_sync.conflicts import Conflict, load_conflicts, remove_conflict
+from hwr_sync.conflicts import (
+    Conflict,
+    STATUS_RESOLVED_USER_DELETED,
+    STATUS_RESOLVED_USER_EDITED,
+    load_conflicts,
+    open_conflicts,
+    remove_conflict,
+    resolve_conflict,
+)
 from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, load_config
 from hwr_sync.state import load_state
 from hwr_sync.sync import sync
@@ -124,7 +132,7 @@ def status():
     state = load_state()
     click.echo(f"Events in sync:  {len(state)}")
 
-    conflicts = load_conflicts()
+    conflicts = open_conflicts()
     if conflicts:
         click.echo(f"Conflicts:       {len(conflicts)} open — run `hwr-sync conflicts` to review")
     else:
@@ -176,14 +184,14 @@ def conflicts_cmd(do_sync: bool):
             click.echo("\nAborted.")
             sys.exit(0)
 
-    conflicts = load_conflicts()
+    conflicts = open_conflicts()
     if not conflicts:
-        click.echo("No conflicts. Everything is in sync.")
+        click.echo("No open conflicts. Everything is in sync.")
         if not do_sync:
             click.echo("Run `hwr-sync conflicts --sync` to scan for new ones first.")
         return
 
-    click.echo(f"\n{len(conflicts)} conflict(s) to review.\n")
+    click.echo(f"\n{len(conflicts)} open conflict(s) to review.\n")
     click.echo("Options per item:  [k] keep yours  [r] restore from HWR  [s] skip (decide later)\n")
 
     backend = None  # lazy init
@@ -212,8 +220,11 @@ def conflicts_cmd(do_sync: bool):
                 if backend is None:
                     from hwr_sync.backends import get_backend
                     backend = get_backend(load_config())
-                _execute_resolution(c, choice, backend)
-                resolved.append(c.uid)
+                resolution_status = _execute_resolution(c, choice, backend)
+                if resolution_status:
+                    resolved.append((c.uid, resolution_status))
+                else:
+                    resolved.append((c.uid, None))
                 click.echo()
 
             remaining = len(conflicts) - i - 1
@@ -228,8 +239,12 @@ def conflicts_cmd(do_sync: bool):
         skipped.extend(conflicts[visited:])
         click.echo("\n\nInterrupted — saving progress so far.")
 
-    for uid in resolved:
-        remove_conflict(uid)
+    for uid, status in resolved:
+        if status is None:
+            # "restore HWR" — entry no longer needed, remove entirely
+            remove_conflict(uid)
+        else:
+            resolve_conflict(uid, status)
 
     click.echo(f"\nDone. {len(resolved)} resolved, {len(skipped)} left open.")
 
@@ -309,7 +324,8 @@ def _conflict_options(c: Conflict) -> dict[str, str]:
     return {"k": "keep", "r": "restore"}
 
 
-def _execute_resolution(c: Conflict, choice: str, backend) -> None:
+def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
+    """Execute the user's resolution choice. Returns the resolved status, or None for 'restore HWR'."""
     from hwr_sync.fetcher import CalEvent
     from hwr_sync.state import load_state, save_state
 
@@ -328,10 +344,15 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> None:
                     description="",
                 )
                 managed.event_hash = make_hash(cal_event)
+                resolution_status = STATUS_RESOLVED_USER_EDITED
             else:
                 del state[c.uid]
+                resolution_status = STATUS_RESOLVED_USER_DELETED
             _save_state_dict(state)
+        else:
+            resolution_status = STATUS_RESOLVED_USER_DELETED
         click.echo("Kept your version.")
+        return resolution_status
 
     elif choice == "r":
         ics_event = CalEvent(
@@ -352,6 +373,7 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> None:
                 state[c.uid].cal_id = new_ids.get(c.uid, "")
                 _save_state_dict(state)
             click.echo("Restored HWR version in calendar.")
+        return None  # remove entry entirely — clean state
 
 
 def _save_state_dict(state) -> None:
