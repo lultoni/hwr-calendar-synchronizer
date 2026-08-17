@@ -24,7 +24,7 @@ class Conflict:
     ics_start: str
     ics_end: str
     ics_location: str
-    cal_title: str   # what's currently in the calendar ("" if deleted)
+    cal_title: str   # what's currently in the calendar (only meaningful for user_modified/both_changed)
     cal_start: str
     cal_end: str
     cal_location: str

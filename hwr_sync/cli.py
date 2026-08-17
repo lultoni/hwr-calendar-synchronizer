@@ -320,7 +320,7 @@ def _print_conflict(c: Conflict) -> None:
         if c.ics_location:
             click.echo(f"    Location: {c.ics_location}")
 
-    if c.cal_title:
+    if c.kind in ("user_modified", "both_changed"):
         click.echo(f"  Your version:")
         click.echo(f"    Title:    {c.cal_title}")
         click.echo(f"    Start:    {_fmt_dt(c.cal_start)}")
@@ -351,7 +351,7 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
         state = load_state()
         if c.uid in state:
             managed = state[c.uid]
-            if c.cal_title:
+            if c.kind in ("user_modified", "both_changed"):
                 from hwr_sync.state import ManagedEvent, make_hash
                 cal_event = CalEvent(
                     uid=c.uid,
@@ -381,7 +381,7 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
             location=c.ics_location,
             description="",
         )
-        if c.cal_title:
+        if c.kind in ("user_modified", "both_changed"):
             backend.update([ics_event])
             click.echo("Restored HWR version in calendar.")
         else:
