@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from icalendar import Calendar, Event
+from icalendar import Calendar
 
 
 @dataclass
