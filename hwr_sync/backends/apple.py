@@ -3,16 +3,17 @@ from __future__ import annotations
 import sys
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 from hwr_sync.backends.base import CalendarBackend
 from hwr_sync.fetcher import CalEvent
-from hwr_sync.state import ManagedEvent
+from hwr_sync.state import ManagedEvent, STATE_PATH
 
 
 class AppleCalendarBackend(CalendarBackend):
     """Uses pyobjc EventKit to write directly to Apple Calendar (macOS only)."""
 
-    def __init__(self, calendar_name: str, create_missing_calendar: bool = False) -> None:
+    def __init__(self, calendar_name: str, create_missing_calendar: bool = False, state_path: Path = STATE_PATH) -> None:
         try:
             import EventKit  # type: ignore
         except ImportError:
@@ -22,6 +23,7 @@ class AppleCalendarBackend(CalendarBackend):
             )
         self._ek = EventKit
         self._store = EventKit.EKEventStore.alloc().init()
+        self._state_path = state_path
         self._request_access()
         self._calendar = self._get_or_create(calendar_name, create_missing_calendar)
 
@@ -89,7 +91,7 @@ class AppleCalendarBackend(CalendarBackend):
         found: dict[str, CalEvent] = {}
         from hwr_sync.state import load_state
 
-        state = load_state()
+        state = load_state(self._state_path)
         for uid in uids:
             managed = state.get(uid)
             if not managed or not managed.cal_id:
@@ -122,7 +124,7 @@ class AppleCalendarBackend(CalendarBackend):
 
     def update(self, events: list[CalEvent]) -> None:
         from hwr_sync.state import load_state
-        state = load_state()
+        state = load_state(self._state_path)
         for e in events:
             managed = state.get(e.uid)
             ev = None

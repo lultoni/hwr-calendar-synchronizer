@@ -46,6 +46,8 @@ class Config:
     sync_interval_hours: int
     filters: FilterConfig
     caldav_url: str | None = None
+    microsoft_client_id: str | None = None
+    microsoft_tenant_id: str | None = None
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
@@ -81,6 +83,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         sync_interval_hours=int(raw.get("sync_interval_hours", 6)),
         filters=filters,
         caldav_url=raw.get("caldav_url"),
+        microsoft_client_id=raw.get("microsoft_client_id"),
+        microsoft_tenant_id=raw.get("microsoft_tenant_id"),
     )
 
 

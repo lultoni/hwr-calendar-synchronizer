@@ -19,7 +19,7 @@ from hwr_sync.diff import compute_diff
 from hwr_sync.fetcher import fetch_ics
 from hwr_sync.filter import apply_filters, filter_past
 from hwr_sync.notify import notify
-from hwr_sync.state import load_state, make_hash, save_state
+from hwr_sync.state import load_state, make_hash, save_state, state_path_for_backend
 
 logger = logging.getLogger("hwr_sync")
 
@@ -46,7 +46,8 @@ def sync(emit_notifications: bool = True, create_missing_calendar: bool = False)
     # 2. Load state (= what HWR said last sync)
     #    Drop past events silently — they fell out of the ICS naturally and
     #    must not be deleted from the calendar by the diff.
-    state = load_state()
+    state_path = state_path_for_backend(config.calendar_backend)
+    state = load_state(state_path)
     state = {
         uid: m for uid, m in state.items()
         if datetime.fromisoformat(m.end) >= now
@@ -96,7 +97,7 @@ def sync(emit_notifications: bool = True, create_missing_calendar: bool = False)
     cal_ids.update(new_cal_ids)
 
     # 9. Save state = ICS stand (all incoming events we manage)
-    save_state(events, cal_ids=cal_ids)
+    save_state(events, cal_ids=cal_ids, path=state_path)
 
     # Record HWR-driven changes (added/updated/deleted by HWR, not by the user).
     # Skip on the very first run (empty prior state) — everything in diff.new is

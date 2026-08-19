@@ -65,9 +65,17 @@ semesters:
 calendar_name: "University"
 
 # Calendar backend.
-# "auto" detects your OS on first run and writes the detected value here.
-# Supported: auto | apple | caldav | ics_file
-calendar_backend: "auto"
+# Supported: apple | outlook
+# - apple:   Apple Calendar on macOS (install with: uv tool install -e '.[apple]')
+# - outlook: Outlook / Teams work & university accounts (install with: uv tool install -e '.[outlook]')
+calendar_backend: "apple"
+
+# Outlook backend only — most users can leave these as-is.
+# The defaults use Microsoft's Graph Explorer app, which works for any work or
+# university account with no Azure setup. Change only if your organisation has
+# disabled user consent and your IT admin has registered a dedicated app for you.
+# microsoft_client_id: "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+# microsoft_tenant_id: "common"
 
 # CalDAV server URL — only needed when calendar_backend is "caldav"
 # caldav_url: "https://caldav.example.com/dav/calendars/user/university/"

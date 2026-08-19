@@ -1,8 +1,8 @@
 # HWR Calendar Synchronizer
 
-Syncs your HWR Berlin timetable into Apple Calendar automatically. Runs as a background job, diffs every change against what HWR last published, and respects edits you make in your calendar app — without ever silently overwriting them.
+Syncs your HWR Berlin timetable into Apple Calendar or Outlook/Teams automatically. Runs as a background job, diffs every change against what HWR last published, and respects edits you make in your calendar app — without ever silently overwriting them.
 
-**Platform:** macOS only (Apple Calendar via EventKit). Linux and Windows support is planned.
+**Platform:** macOS only. Linux and Windows support is planned.
 
 ---
 
@@ -33,6 +33,8 @@ Read the README at https://github.com/lultoni/hwr-calendar-synchronizer and foll
 
 ### Manual
 
+**Apple Calendar:**
+
 ```bash
 git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
@@ -40,16 +42,29 @@ cd hwr-calendar-synchronizer
 # Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install (includes Apple Calendar support)
 uv tool install -e ".[apple]"
-
-# Configure
 hwr-sync settings
-
-# Test, then enable background sync
 hwr-sync run
 hwr-sync start
 ```
+
+**Outlook / Teams (work & university accounts):**
+
+```bash
+git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
+cd hwr-calendar-synchronizer
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv tool install -e ".[outlook]"
+hwr-sync settings   # set calendar_backend: outlook and calendar_name
+hwr-sync run        # opens a one-time browser login, then syncs
+hwr-sync start
+```
+
+On first run you'll be shown a URL and a short code. Open the URL in any browser, sign in with your work or university Microsoft account, and enter the code. That's it — all future syncs run silently in the background without any further interaction.
+
+> **Personal Microsoft accounts** work the same way. See the Configuration section for the optional `microsoft_client_id` / `microsoft_tenant_id` keys if you need to point the tool at a specific Azure app registration.
 
 ### Step by step
 
@@ -68,7 +83,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```bash
 git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
+
+# Apple Calendar
 uv tool install -e ".[apple]"
+
+# Outlook / Teams
+uv tool install -e ".[outlook]"
 ```
 
 **4 — Configure**
@@ -86,7 +106,9 @@ hwr-sync run    # test — check your calendar app after this
 hwr-sync start  # enable automatic background sync
 ```
 
-If the calendar named in your config doesn't exist in Apple Calendar yet, pass `--create-missing-calendar` to have it created automatically.
+If the calendar named in your config doesn't exist yet, pass `--create-missing-calendar` to have it created automatically.
+
+> **Switching backends?** Just change `calendar_backend` in your config and reinstall with the correct extras flag (e.g. `uv tool install -e '.[outlook]' --reinstall`). Each backend keeps its own state file — conflicts and overrides carry over automatically.
 
 ---
 
@@ -95,7 +117,13 @@ If the calendar named in your config doesn't exist in Apple Calendar yet, pass `
 ```bash
 cd hwr-calendar-synchronizer
 git pull
+
+# Apple Calendar
 uv tool install -e ".[apple]" --reinstall
+
+# Outlook / Teams
+uv tool install -e ".[outlook]" --reinstall
+
 hwr-sync stop && hwr-sync start
 ```
 
@@ -126,6 +154,24 @@ Logs are written to `~/.config/hwr-sync/hwr-sync.log` (rotates at 1 MB, keeps 3 
 The tool also maintains two internal files you don't normally need to touch:
 - `~/.config/hwr-sync/state.json` — last-known ICS snapshot, used to detect what HWR changed
 - `~/.config/hwr-sync/conflicts.json` — open conflicts waiting for your resolution
+
+### Calendar backend
+
+```yaml
+calendar_backend: "apple"    # Apple Calendar (macOS, default)
+calendar_backend: "outlook"  # Outlook / Teams (work & university accounts)
+```
+
+For the Outlook backend, two additional keys are needed:
+
+```yaml
+microsoft_client_id: "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+microsoft_tenant_id: "common"
+```
+
+**Most users don't need to change these.** The defaults above use Microsoft's own Graph Explorer app registration, which works for any work or university Microsoft account with no Azure setup required. The one-time browser login handles everything.
+
+The only reason to change them is if your organisation has disabled user consent for third-party apps — in that case your IT admin needs to register a dedicated Azure AD app (public client, `Calendars.ReadWrite` delegated permission, device code flow enabled) and give you its client ID and tenant ID to put here.
 
 ### Semesters
 
@@ -218,7 +264,7 @@ Use `--interval N` to set a different interval. For clean divisors of 24 (1, 2, 
 ## Open items
 
 - **Google Calendar backend** — requires OAuth2, not yet implemented
-- **Linux / Windows support** — no native calendar backend or scheduler integration yet
+- **Linux / Windows support** — no scheduler integration yet
 
 ---
 
@@ -235,7 +281,7 @@ hwr_sync/
   state.py         # persists last-known ICS state
   config.py        # config loading, URL construction, semester detection
   notify.py        # macOS desktop notifications
-  backends/        # apple (EventKit)
+  backends/        # apple (EventKit), outlook (Microsoft Graph)
   scheduler/       # launchd
   config.example.yaml
 ```

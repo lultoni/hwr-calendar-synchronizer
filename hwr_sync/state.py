@@ -11,6 +11,10 @@ from hwr_sync.config import CONFIG_DIR
 STATE_PATH = CONFIG_DIR / "state.json"
 
 
+def state_path_for_backend(backend: str) -> Path:
+    return CONFIG_DIR / f"state_{backend}.json"
+
+
 @dataclass
 class ManagedEvent:
     uid: str

@@ -23,7 +23,7 @@ from hwr_sync.conflicts import (
 )
 from hwr_sync.changes import clear_changes, load_changes
 from hwr_sync.config import CONFIG_DIR, CONFIG_PATH, load_config
-from hwr_sync.state import load_state
+from hwr_sync.state import load_state, state_path_for_backend
 from hwr_sync.sync import sync
 
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,6 +62,16 @@ def main(verbose: bool):
               help="Create the calendar in Apple Calendar if it doesn't exist.")
 def run(create_missing_calendar: bool):
     """Run a single sync pass right now."""
+    now = datetime.now(tz=timezone.utc)
+    if scheduler.is_installed():
+        try:
+            config = load_config()
+            next_time = _next_fire_time(config.sync_interval_hours, now)
+            click.echo(f"[INFO] Next scheduled run at {next_time}.")
+        except Exception:
+            click.echo("[INFO] Scheduler is active.")
+    else:
+        click.echo("[INFO] No scheduler found. Run `hwr-sync start` to enable automatic syncing.")
     try:
         active = sync(create_missing_calendar=create_missing_calendar)
     except KeyboardInterrupt:
@@ -130,7 +140,7 @@ def status():
     else:
         click.echo("Active semester: none (study period complete)")
 
-    state = load_state()
+    state = load_state(state_path_for_backend(config.calendar_backend))
     click.echo(f"Events in sync:  {len(state)}")
 
     conflicts = open_conflicts()
@@ -237,8 +247,9 @@ def conflicts_cmd(do_sync: bool):
             else:
                 if backend is None:
                     from hwr_sync.backends import get_backend
-                    backend = get_backend(load_config())
-                resolution_status = _execute_resolution(c, choice, backend)
+                    config = load_config()
+                    backend = get_backend(config)
+                resolution_status = _execute_resolution(c, choice, backend, config)
                 if resolution_status:
                     resolved.append((c.uid, resolution_status))
                 else:
@@ -342,13 +353,15 @@ def _conflict_options(c: Conflict) -> dict[str, str]:
     return {"k": "keep", "r": "restore"}
 
 
-def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
+def _execute_resolution(c: Conflict, choice: str, backend, config) -> str | None:
     """Execute the user's resolution choice. Returns the resolved status, or None for 'restore HWR'."""
     from hwr_sync.fetcher import CalEvent
     from hwr_sync.state import load_state, save_state
 
+    _state_path = state_path_for_backend(config.calendar_backend)
+
     if choice == "k":
-        state = load_state()
+        state = load_state(_state_path)
         if c.uid in state:
             managed = state[c.uid]
             if c.kind in ("user_modified", "both_changed"):
@@ -366,7 +379,7 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
             else:
                 del state[c.uid]
                 resolution_status = STATUS_RESOLVED_USER_DELETED
-            _save_state_dict(state)
+            _save_state_dict(state, _state_path)
         else:
             resolution_status = STATUS_RESOLVED_USER_DELETED
         click.echo("Kept your version.")
@@ -386,20 +399,19 @@ def _execute_resolution(c: Conflict, choice: str, backend) -> str | None:
             click.echo("Restored HWR version in calendar.")
         else:
             new_ids = backend.insert([ics_event])
-            state = load_state()
+            state = load_state(_state_path)
             if c.uid in state:
                 state[c.uid].cal_id = new_ids.get(c.uid, "")
-                _save_state_dict(state)
+                _save_state_dict(state, _state_path)
             click.echo("Restored HWR version in calendar.")
         return None  # remove entry entirely — clean state
 
 
-def _save_state_dict(state) -> None:
-    from hwr_sync.state import STATE_PATH
+def _save_state_dict(state, path) -> None:
     import json
     from dataclasses import asdict
     data = {uid: asdict(m) for uid, m in state.items()}
-    STATE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _copy_example(filename: str, dest: Path, fallback: str | None = None) -> None:

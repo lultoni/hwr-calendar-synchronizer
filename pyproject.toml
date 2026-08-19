@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 apple = ["pyobjc-framework-EventKit>=10.0"]
+outlook = ["msal>=1.28"]
 
 [project.scripts]
 hwr-sync = "hwr_sync.cli:main"
