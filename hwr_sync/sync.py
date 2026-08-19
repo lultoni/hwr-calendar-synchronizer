@@ -16,7 +16,7 @@ from hwr_sync.conflicts import (
     save_conflicts,
 )
 from hwr_sync.diff import compute_diff
-from hwr_sync.fetcher import fetch_ics
+from hwr_sync.fetcher import FetchError, fetch_ics
 from hwr_sync.filter import apply_filters, filter_past
 from hwr_sync.notify import notify
 from hwr_sync.state import load_state, make_hash, save_state, state_path_for_backend
@@ -38,7 +38,14 @@ def sync(emit_notifications: bool = True, create_missing_calendar: bool = False)
 
     # 1. Fetch + filter ICS (= what HWR currently says)
     url = build_ics_url(config.faculty, semester.number, semester.course)
-    all_events = fetch_ics(url)
+    try:
+        all_events = fetch_ics(url)
+    except FetchError as e:
+        msg = str(e)
+        logger.error("Fetch failed: %s", msg)
+        if emit_notifications:
+            notify("HWR Sync: Fetch failed", msg)
+        return True  # study period not over, just a transient error
     events = filter_past(all_events, now)
     active_filters = semester.filters if semester.filters is not None else config.filters
     events = apply_filters(events, active_filters)

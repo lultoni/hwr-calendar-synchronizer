@@ -20,14 +20,36 @@ class CalEvent:
     description: str
 
 
+class FetchError(Exception):
+    """Raised when the ICS cannot be fetched or parsed."""
+
+
 def fetch_ics(url: str) -> list[CalEvent]:
     """Download ICS from url, parse events, delete temp file, return events."""
     tmp = Path(tempfile.gettempdir()) / f"hwr_sync_{uuid.uuid4().hex}.ics"
     try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+        try:
+            response = requests.get(url, timeout=30)
+        except requests.exceptions.ConnectionError:
+            raise FetchError("Could not reach the HWR server — check your internet connection.")
+        except requests.exceptions.Timeout:
+            raise FetchError("HWR server timed out after 30s.")
+
+        if not response.ok:
+            raise FetchError(f"HWR server returned HTTP {response.status_code}.")
+
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" in content_type:
+            raise FetchError(
+                "HWR returned an HTML page instead of a calendar — "
+                "the timetable URL may require a login or has changed."
+            )
+
         tmp.write_bytes(response.content)
-        return _parse_ics(tmp)
+        try:
+            return _parse_ics(tmp)
+        except Exception as e:
+            raise FetchError(f"Failed to parse ICS from HWR: {e}")
     finally:
         if tmp.exists():
             tmp.unlink()
