@@ -33,8 +33,6 @@ Read the README at https://github.com/lultoni/hwr-calendar-synchronizer and foll
 
 ### Manual
 
-**Apple Calendar:**
-
 ```bash
 git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
 cd hwr-calendar-synchronizer
@@ -42,24 +40,14 @@ cd hwr-calendar-synchronizer
 # Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-uv tool install -e ".[apple]"
-hwr-sync settings
-hwr-sync run
-hwr-sync start
-```
+# Installing the backend (one of the following two)
+uv tool install -e ".[apple]" # Apple Calendar
+uv tool install -e ".[outlook]" # Outlook / Teams (work & university accounts)
 
-**Outlook / Teams (work & university accounts):**
 
-```bash
-git clone https://github.com/lultoni/hwr-calendar-synchronizer.git
-cd hwr-calendar-synchronizer
-
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv tool install -e ".[outlook]"
-hwr-sync settings   # set calendar_backend: outlook and calendar_name
-hwr-sync run        # opens a one-time browser login, then syncs
-hwr-sync start
+hwr-sync settings # set calendar_backend: outlook/apple and calendar_name
+hwr-sync run      # for outlook this opens a one-time browser login (follow instructions shown there), then syncs
+hwr-sync start    # registers this tool to run periodically in the background
 ```
 
 On first run you'll be shown a URL and a short code. Open the URL in any browser, sign in with your work or university Microsoft account, and enter the code. That's it — all future syncs run silently in the background without any further interaction.
@@ -282,6 +270,6 @@ hwr_sync/
   config.py        # config loading, URL construction, semester detection
   notify.py        # macOS desktop notifications
   backends/        # apple (EventKit), outlook (Microsoft Graph)
-  scheduler/       # launchd
+  scheduler/       # launchd (macOS)
   config.example.yaml
 ```
